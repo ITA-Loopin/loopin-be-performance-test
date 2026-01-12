@@ -5,7 +5,7 @@ on:
     branches: [ dev ]
 
 env:
-  DOCKER_IMAGE: junhui9789/loopin-test-app
+  DOCKER_IMAGE: junhui9789/loopin-app
 
 jobs:
   ci:

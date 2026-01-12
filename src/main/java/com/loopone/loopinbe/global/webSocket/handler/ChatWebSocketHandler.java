@@ -136,6 +136,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                             content,
                             null,
                             null,
+                            null,
                             ChatMessage.AuthorType.USER,
                             false,
                             now,

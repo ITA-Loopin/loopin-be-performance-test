@@ -66,6 +66,9 @@ public enum ReturnCode {
     FILE_NOT_FOUND(404, "STORAGE_001", "파일을 찾을 수 없습니다."),
     FILE_UPLOAD_ERROR(500, "STORAGE_002", "파일 업로드에 실패했습니다."),
     FILE_DELETE_ERROR(500, "STORAGE_003", "파일 삭제에 실패했습니다."),
+    FILE_CONTENT_TYPE_ERROR(500, "STORAGE_004", "파일의 content-type이 적절하지 않습니다."),
+    MAX_FILE_LIMIT_EXCEEDED(400, "STORAGE_005", "파일 최대 전송 수량을 초과했습니다."),
+    MAX_FILE_SIZE_LIMIT_EXCEEDED(400, "STORAGE_006", "파일 최대 전송 용량을 초과했습니다."),
 
     // Email
     EMAIL_SEND_FAIL(500, "EMAIL_001", "이메일 전송에 실패했습니다."),

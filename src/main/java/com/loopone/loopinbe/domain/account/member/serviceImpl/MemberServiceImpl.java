@@ -16,6 +16,7 @@ import com.loopone.loopinbe.domain.account.member.repository.MemberFollowReposit
 import com.loopone.loopinbe.domain.account.member.repository.MemberFollowReqRepository;
 import com.loopone.loopinbe.domain.account.member.repository.MemberRepository;
 import com.loopone.loopinbe.domain.account.member.service.MemberService;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.chat.chatRoom.service.ChatRoomService;
 import com.loopone.loopinbe.domain.loop.loop.service.LoopService;
 import com.loopone.loopinbe.domain.notification.dto.NotificationPayload;
@@ -44,6 +45,7 @@ import java.time.LocalDateTime;
 import java.util.Objects;
 
 import static com.loopone.loopinbe.global.constants.KafkaKey.FOLLOW_NOTIFICATION_TOPIC;
+import static org.springframework.util.StringUtils.hasText;
 
 @Slf4j
 @Service
@@ -152,19 +154,31 @@ public class MemberServiceImpl implements MemberService {
                 if (imageFile == null || imageFile.isEmpty()) {
                     throw new ServiceException(ReturnCode.PROFILE_IMAGE_REQUIRED);
                 }
-                if (StringUtils.hasText(currentImageUrl)) {
-                    s3Service.deleteFile(currentImageUrl);
-                }
                 try {
-                    finalImageUrl = s3Service.uploadImageFile(imageFile, "profile-image");
+                    // 1) 새 이미지 업로드 (먼저 업로드 성공시키고)
+                    ChatAttachment uploaded = s3Service.uploadChatImage(imageFile, "profile-images");
+                    String newUrl = s3Service.toPublicUrl(uploaded.key());
+
+                    // 2) 기존 이미지 삭제 (기존 URL이 있으면)
+                    if (hasText(currentImageUrl)) {
+                        String oldKey = extractKeyFromPublicUrl(currentImageUrl);
+                        if (hasText(oldKey)) {
+                            s3Service.deleteObjectByKey(oldKey);
+                        }
+                    }
+                    // 3) 최종 URL 반영
+                    finalImageUrl = newUrl;
                 } catch (IOException e) {
                     throw new ServiceException(ReturnCode.INTERNAL_ERROR);
                 }
             }
             case DELETE -> {
                 // 삭제: 기존 이미지 있으면 삭제 후 비움
-                if (StringUtils.hasText(currentImageUrl)) {
-                    s3Service.deleteFile(currentImageUrl);
+                if (hasText(currentImageUrl)) {
+                    String oldKey = extractKeyFromPublicUrl(currentImageUrl);
+                    if (hasText(oldKey)) {
+                        s3Service.deleteObjectByKey(oldKey);
+                    }
                 }
                 finalImageUrl = "";
             }
@@ -335,6 +349,18 @@ public class MemberServiceImpl implements MemberService {
         int maxPageSize = MemberPage.getMaxPageSize();
         if (pageSize > maxPageSize) {
             throw new ServiceException(ReturnCode.PAGE_REQUEST_FAIL);
+        }
+    }
+
+    private String extractKeyFromPublicUrl(String publicUrl) {
+        try {
+            java.net.URI uri = java.net.URI.create(publicUrl);
+            String path = uri.getPath(); // "/profile-images/...."
+            if (path == null) return null;
+            return path.startsWith("/") ? path.substring(1) : path;
+        } catch (IllegalArgumentException e) {
+            // URL 형태가 깨져있으면 내부오류로 보는 게 맞음(가정 위반)
+            throw new ServiceException(ReturnCode.INTERNAL_ERROR);
         }
     }
 }

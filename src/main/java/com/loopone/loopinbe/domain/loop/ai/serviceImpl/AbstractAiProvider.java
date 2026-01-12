@@ -41,8 +41,20 @@ public abstract class AbstractAiProvider implements AiProvider {
         String prompt = buildPrompt(payload);
         String raw = callModel(prompt);
         RecommendationsLoop parsed = parse(raw);
-        cache(payload.clientMessageId().toString(), parsed);
-        return parsed;
+
+        Long loopRuleId = null;
+        if (payload.loopDetailResponse() != null && payload.loopDetailResponse().loopRule() != null) {
+            loopRuleId = payload.loopDetailResponse().loopRule().ruleId();
+        }
+
+        RecommendationsLoop resultWithRuleId = new RecommendationsLoop(
+                parsed.title(),
+                loopRuleId,
+                parsed.recommendations()
+        );
+
+        cache(payload.clientMessageId().toString(), resultWithRuleId);
+        return resultWithRuleId;
     }
 
     protected String buildPrompt(AiPayload payload) {
@@ -58,7 +70,7 @@ public abstract class AbstractAiProvider implements AiProvider {
             return objectMapper.readValue(result, RecommendationsLoop.class);
         } catch (JsonProcessingException e) {
             log.warn("AI 응답 JSON 파싱 실패", e);
-            return new RecommendationsLoop(Collections.emptyList());
+            return new RecommendationsLoop(null, null, Collections.emptyList());
         }
     }
 
@@ -77,7 +89,7 @@ public abstract class AbstractAiProvider implements AiProvider {
 
     private String updatePrompt(String message, LoopDetailResponse loop) {
         String checklistText = loop.checklists().stream()
-                .map(c -> "- " + c.content() + " (완료 여부: " + c.completed() + ")")
+                .map(c -> "- " + c.content())
                 .collect(Collectors.joining("\n"));
 
         return UPDATE_LOOP_PROMPT.formatted(

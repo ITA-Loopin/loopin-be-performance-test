@@ -16,7 +16,6 @@ import com.loopone.loopinbe.domain.chat.chatRoom.repository.ChatRoomMemberReposi
 import com.loopone.loopinbe.domain.chat.chatRoom.repository.ChatRoomRepository;
 import com.loopone.loopinbe.domain.chat.chatRoom.service.ChatRoomService;
 import com.loopone.loopinbe.domain.loop.loop.dto.res.LoopDetailResponse;
-import com.loopone.loopinbe.domain.loop.loop.entity.Loop;
 import com.loopone.loopinbe.domain.loop.loop.mapper.LoopMapper;
 import com.loopone.loopinbe.domain.loop.loop.repository.LoopRepository;
 import com.loopone.loopinbe.domain.team.team.entity.Team;
@@ -106,6 +105,7 @@ public class ChatRoomServiceImpl implements ChatRoomService {
                 .orElseThrow(() -> new ServiceException(ReturnCode.USER_NOT_FOUND));
         // 새로운 채팅방 생성
         ChatRoom chatRoom = ChatRoom.builder()
+                .title("새 채팅")
                 .member(member)
                 .build();
         // 본인을 맨 앞에 추가
@@ -119,6 +119,17 @@ public class ChatRoomServiceImpl implements ChatRoomService {
         chatRoomRepository.save(chatRoom);
         memberRepository.save(member);
         return chatRoomConverter.toChatRoomResponse(enterChatRoomMyself);
+    }
+
+    @Override
+    @Transactional
+    public void updateChatRoomTitle(Long chatRoomId, String title) {
+        ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+                .orElseThrow(() -> new ServiceException(ReturnCode.CHATROOM_NOT_FOUND));
+
+        if (chatRoom.getTitle().equals("새 채팅")) {
+            chatRoom.updateTitle(title);
+        }
     }
 
     @Override

@@ -1,5 +1,7 @@
 package com.loopone.loopinbe.global.s3;
 
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
+import com.loopone.loopinbe.domain.chat.chatMessage.enums.AttachmentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -24,68 +26,110 @@ import java.util.UUID;
 public class S3Service {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
+    private static final String REGION_ENDPOINT = "s3.ap-northeast-2.amazonaws.com";
 
     @Value("${spring.aws.credentials.s3.bucket}")
     private String BUCKET_NAME;
 
-    // 이미지 업로드
-    public String uploadImageFile(MultipartFile file, String dirName) throws IOException {
-        String fileName = dirName + "/" + UUID.randomUUID() + "_" + file.getOriginalFilename();
-        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+    // 채팅 이미지 업로드
+    public ChatAttachment uploadChatImage(MultipartFile file, String dirName) throws IOException {
+        String key = buildKey(dirName, file.getOriginalFilename());
+        PutObjectRequest req = PutObjectRequest.builder()
                 .bucket(BUCKET_NAME)
-                .key(fileName)
+                .key(key)
                 .contentType(file.getContentType())
+                .contentDisposition("inline")
                 .build();
-        s3Client.putObject(putObjectRequest,
-                RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
+        s3Client.putObject(req, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
 
-        return "https://" + BUCKET_NAME + ".s3.ap-northeast-2.amazonaws.com/" + fileName;
+        return new ChatAttachment(
+                AttachmentType.IMAGE,
+                key,
+                file.getOriginalFilename(),
+                file.getContentType(),
+                file.getSize()
+        );
     }
 
-    // 보고서(PDF, Excel) 파일용 업로드
-    public String uploadFile(byte[] content, String fileName, String contentType, String downloadFileName) {
-        PutObjectRequest request = PutObjectRequest.builder()
+    // 채팅 파일 업로드
+    public ChatAttachment uploadChatFile(MultipartFile file, String dirName) throws IOException {
+        String key = buildKey(dirName, file.getOriginalFilename());
+        String disposition = buildContentDisposition(file.getOriginalFilename());
+
+        PutObjectRequest req = PutObjectRequest.builder()
                 .bucket(BUCKET_NAME)
-                .key(fileName)
-                .contentType(contentType)
+                .key(key)
+                .contentType(file.getContentType())
+                .contentDisposition(disposition) // 객체 메타데이터로 저장(직접 URL 접근 시에도 도움)
                 .build();
-        s3Client.putObject(request, RequestBody.fromBytes(content));
-        return "https://" + BUCKET_NAME + ".s3.ap-northeast-2.amazonaws.com/" + fileName;
+        s3Client.putObject(req, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
+
+        return new ChatAttachment(
+                AttachmentType.FILE,
+                key,
+                file.getOriginalFilename(),
+                file.getContentType(),
+                file.getSize()
+        );
     }
 
-    public void deleteFile(String fileUrl) {
-        String fileName = extractFileName(fileUrl);
-        DeleteObjectRequest deleteObjectRequest = DeleteObjectRequest.builder()
+    // key 기반 삭제
+    public void deleteObjectByKey(String key) {
+        DeleteObjectRequest req = DeleteObjectRequest.builder()
                 .bucket(BUCKET_NAME)
-                .key(fileName)
+                .key(key)
                 .build();
-        s3Client.deleteObject(deleteObjectRequest);
+        s3Client.deleteObject(req);
     }
 
-    public void deleteAllFile(List<String> imageUrls) {
-        for (String fileName : imageUrls) {
-            deleteFile(fileName);
+    public void deleteAllByKeys(List<String> keys) {
+        if (keys == null) return;
+        for (String key : keys) {
+            if (key == null || key.isBlank()) continue;
+            deleteObjectByKey(key);
         }
     }
 
-    // DB에 저장된 전체 URL에서 S3에 저장된 파일명만 추출
-    private String extractFileName(String fileUrl) {
-        String prefix = "https://" + BUCKET_NAME + ".s3.ap-northeast-2.amazonaws.com/";
-        return fileUrl.replace(prefix, "");
-    }
-
-    public String generatePresignedUrl(String fileKey, String downloadFileName) {
+    // 파일 다운로드용 presigned url (파일명 지정)
+    public String generateDownloadPresignedUrl(String key, String downloadFileName) {
         String encodedFileName = encodeRFC5987(downloadFileName);
-        String contentDisposition = "attachment; filename=\"" + sanitizeAsciiFallback(downloadFileName) + "\"; filename*=UTF-8''" + encodedFileName;
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+        String contentDisposition = "attachment; filename=\"" + sanitizeAsciiFallback(downloadFileName)
+                + "\"; filename*=UTF-8''" + encodedFileName;
+
+        GetObjectRequest getReq = GetObjectRequest.builder()
                 .bucket(BUCKET_NAME)
-                .key(fileKey)
+                .key(key)
                 .responseContentDisposition(contentDisposition)
                 .build();
+
         return s3Presigner.presignGetObject(b -> b
                 .signatureDuration(Duration.ofMinutes(10))
-                .getObjectRequest(getObjectRequest)
+                .getObjectRequest(getReq)
         ).url().toString();
+    }
+
+    // ----------------- 헬퍼 메서드 -----------------
+
+    // public url 형태가 필요하면 사용
+    public String toPublicUrl(String key) {
+        return "https://" + BUCKET_NAME + "." + REGION_ENDPOINT + "/" + key;
+    }
+
+    private String buildKey(String dirName, String originalName) {
+        String safeName = sanitizeForKey(originalName);
+        return dirName + "/" + UUID.randomUUID() + "_" + safeName;
+    }
+
+    private String sanitizeForKey(String fileName) {
+        if (fileName == null || fileName.isBlank()) return "file";
+        // 슬래시/역슬래시 제거 + 제어문자 제거
+        String s = fileName.replace("\\", "_").replace("/", "_");
+        return s.replaceAll("[\\p{Cntrl}]", "_");
+    }
+
+    private String buildContentDisposition(String downloadFileName) {
+        String encoded = encodeRFC5987(downloadFileName);
+        return "attachment; filename=\"" + sanitizeAsciiFallback(downloadFileName) + "\"; filename*=UTF-8''" + encoded;
     }
 
     private String encodeRFC5987(String fileName) {
@@ -102,6 +146,6 @@ public class S3Service {
 
     private String sanitizeAsciiFallback(String fileName) {
         // fallback용 ASCII-safe 이름
-        return fileName.replaceAll("[^a-zA-Z0-9 _.-]", "_");
+        return fileName == null ? "file" : fileName.replaceAll("[^a-zA-Z0-9 _.-]", "_");
     }
 }

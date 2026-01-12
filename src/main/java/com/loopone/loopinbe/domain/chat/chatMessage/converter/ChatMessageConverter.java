@@ -2,9 +2,12 @@ package com.loopone.loopinbe.domain.chat.chatMessage.converter;
 
 import com.loopone.loopinbe.domain.account.member.entity.Member;
 import com.loopone.loopinbe.domain.account.member.repository.MemberRepository;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatMessagePayload;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.res.ChatAttachmentResponse;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.res.ChatMessageResponse;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessage;
+import com.loopone.loopinbe.global.s3.S3Service;
 import org.mapstruct.Context;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
@@ -17,8 +20,8 @@ import java.util.stream.Collectors;
 
 @Mapper(componentModel = "spring", unmappedTargetPolicy = ReportingPolicy.IGNORE)
 public abstract class ChatMessageConverter {
-    @Autowired
-    protected MemberRepository memberRepository;
+    @Autowired protected MemberRepository memberRepository;
+    @Autowired protected S3Service s3Service;
     private static final String BOT_NICKNAME = "loopin";
     private static final String BOT_PROFILE = null;
 
@@ -28,8 +31,9 @@ public abstract class ChatMessageConverter {
     @Mapping(target = "nickname", expression = "java(resolveNickname(chatMessage, memberMap))")
     @Mapping(target = "profileImageUrl", expression = "java(resolveProfile(chatMessage, memberMap))")
     @Mapping(target = "content", source = "content")
-    @Mapping(target = "attachmentUrls", source = "attachmentUrls")
+    @Mapping(target = "attachments", expression = "java(toAttachmentResponses(chatMessage.getAttachments()))")
     @Mapping(target = "recommendations", source = "recommendations")
+    @Mapping(target = "loopRuleId", source = "loopRuleId")
     @Mapping(target = "authorType", source = "authorType")
     @Mapping(target = "createdAt", source = "createdAt")
     public abstract ChatMessageResponse toChatMessageResponse(
@@ -43,8 +47,9 @@ public abstract class ChatMessageConverter {
     @Mapping(target = "nickname", expression = "java(resolveNickname(payload, memberMap))")
     @Mapping(target = "profileImageUrl", expression = "java(resolveProfile(payload, memberMap))")
     @Mapping(target = "content", source = "content")
-    @Mapping(target = "attachmentUrls", source = "attachmentUrls")
+    @Mapping(target = "attachments", expression = "java(toAttachmentResponses(payload.attachments()))")
     @Mapping(target = "recommendations", source = "recommendations")
+    @Mapping(target = "loopRuleId", source = "loopRuleId")
     @Mapping(target = "authorType", source = "authorType")
     @Mapping(target = "createdAt", source = "createdAt")
     public abstract ChatMessageResponse toChatMessageResponse(
@@ -93,6 +98,24 @@ public abstract class ChatMessageConverter {
 
     protected boolean isBot(ChatMessage chatMessage) {
         return chatMessage.getAuthorType() == ChatMessage.AuthorType.BOT || chatMessage.getMemberId() == null;
+    }
+
+    protected List<ChatAttachmentResponse> toAttachmentResponses(List<ChatAttachment> atts) {
+        if (atts == null || atts.isEmpty()) return Collections.emptyList();
+        return atts.stream().map(att -> {
+            String url = switch (att.type()) {
+                // 버킷 public이면 public url 사용해도 됨
+                case IMAGE -> s3Service.toPublicUrl(att.key());
+                case FILE -> s3Service.generateDownloadPresignedUrl(att.key(), att.originalFileName());
+            };
+            return new ChatAttachmentResponse(
+                    att.type(),
+                    url,
+                    att.originalFileName(),
+                    att.contentType(),
+                    att.size()
+            );
+        }).toList();
     }
 
     // ---------------- helpers (Payload) ----------------

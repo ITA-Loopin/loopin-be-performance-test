@@ -19,9 +19,6 @@ public record LoopUpdateRequest(
         LocalDate specificDate,
 
         @Schema(description = "각 루프에 포함될 체크리스트 내용 목록")
-        List<String> checklists,
-
-        @Schema(description = "채팅방 ID (AI 채팅방 등에서 루프 수정 시 사용, null 가능)")
-        Long chatRoomId
+        List<String> checklists
 ) {}
 
