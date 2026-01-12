@@ -193,41 +193,54 @@ public class TeamServiceImpl implements TeamService {
     @Override
     @Transactional
     public void deleteMyTeams(Member member) {
+        Long memberId = member.getId();
+        // 1) 내가 가입된 팀
         List<TeamMember> myMemberships = teamMemberRepository.findAllByMember(member);
-        if (myMemberships.isEmpty()) return;
         List<Long> myTeamIds = myMemberships.stream()
                 .map(tm -> tm.getTeam().getId())
                 .distinct()
                 .toList();
-        // 내가 리더인 팀들 중, (다른 팀원이 없어서) 팀 자체를 삭제해야 하는 팀들
-        List<Team> myLeaderTeams = teamRepository.findAllByLeaderId(member.getId());
+        // 2) 내가 리더인 팀 (멤버십에 없어도 반드시 처리해야 함)
+        List<Team> myLeaderTeams = teamRepository.findAllByLeaderId(memberId);
+        List<Long> leaderTeamIds = myLeaderTeams.stream()
+                .map(Team::getId)
+                .distinct()
+                .toList();
+        // 3) 내가 연관된 모든 팀 = (가입한 팀 ∪ 리더인 팀)
+        List<Long> allRelatedTeamIds = new ArrayList<>();
+        allRelatedTeamIds.addAll(myTeamIds);
+        allRelatedTeamIds.addAll(leaderTeamIds);
+        allRelatedTeamIds = allRelatedTeamIds.stream().distinct().toList();
+        if (allRelatedTeamIds.isEmpty()) return;
+        // 4) 리더 팀 처리: 위임 or 팀 삭제
         List<Long> teamsToDelete = new ArrayList<>();
         for (Team team : myLeaderTeams) {
-            if (!myTeamIds.contains(team.getId())) continue;
-            teamMemberRepository.findFirstMemberByTeamIdAndMemberIdNot(team.getId(), member.getId())
+            // 리더 팀이면 무조건 처리(기존의 myTeamIds.contains(...) 조건 제거)
+            teamMemberRepository.findFirstByTeam_IdAndMember_IdNotOrderByIdAsc(team.getId(), memberId)
+                    .map(TeamMember::getMember)
                     .ifPresentOrElse(
                             nextLeader -> {
-                                team.setLeader(nextLeader); // 1) 팀 리더 위임
-                                // 2) TeamLoop에 연결된 LoopRule의 member도 새 리더로 위임
-                                teamLoopService.transferTeamLoopRuleOwner(team.getId(), member.getId(), nextLeader);
+                                team.setLeader(nextLeader);
+                                teamRepository.save(team); // 명시적으로 저장
+                                teamLoopService.transferTeamLoopRuleOwner(team.getId(), memberId, nextLeader);
                             },
                             () -> teamsToDelete.add(team.getId())
                     );
         }
-        // 팀은 남고, 나는 탈퇴만 하는 팀들
-        List<Long> remainingTeamIds = myTeamIds.stream()
+        // 5) 팀은 남고 나는 나가기만 하는 팀들
+        List<Long> remainingTeamIds = allRelatedTeamIds.stream()
                 .filter(id -> !teamsToDelete.contains(id))
                 .toList();
-        // 루프 관련 삭제는 TeamLoopService가 담당
-        teamLoopService.deleteMyTeamLoops(member.getId(), teamsToDelete, remainingTeamIds);
-        // (A) 팀 전체 삭제: TeamMember + Team만 삭제 (루프쪽은 이미 위에서 삭제됨)
+        // 6) 루프 관련 삭제
+        teamLoopService.deleteMyTeamLoops(memberId, teamsToDelete, remainingTeamIds);
+        // 7) (A) 팀 전체 삭제
         if (!teamsToDelete.isEmpty()) {
             teamMemberRepository.deleteByTeamIds(teamsToDelete);
             teamRepository.deleteAllByIdInBatch(teamsToDelete);
         }
-        // (B) 팀은 남음: TeamMember만 삭제(탈퇴)
+        // 8) (B) 팀은 남음: 내 TeamMember만 삭제(탈퇴)
         if (!remainingTeamIds.isEmpty()) {
-            teamMemberRepository.deleteByMemberAndTeamIds(member.getId(), remainingTeamIds);
+            teamMemberRepository.deleteByMemberAndTeamIds(memberId, remainingTeamIds);
         }
     }
 

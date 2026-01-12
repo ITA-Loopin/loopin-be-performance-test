@@ -17,7 +17,6 @@ import com.loopone.loopinbe.domain.chat.chatRoom.repository.ChatRoomRepository;
 import com.loopone.loopinbe.domain.chat.chatRoom.service.ChatRoomService;
 import com.loopone.loopinbe.domain.loop.loop.dto.res.LoopDetailResponse;
 import com.loopone.loopinbe.domain.loop.loop.mapper.LoopMapper;
-import com.loopone.loopinbe.domain.loop.loop.repository.LoopRepository;
 import com.loopone.loopinbe.domain.team.team.entity.Team;
 import com.loopone.loopinbe.domain.team.team.repository.TeamRepository;
 import com.loopone.loopinbe.global.exception.ReturnCode;
@@ -42,7 +41,6 @@ public class ChatRoomServiceImpl implements ChatRoomService {
     private final ChatRoomMemberRepository chatRoomMemberRepository;
     private final MemberConverter memberConverter;
     private final ChatRoomConverter chatRoomConverter;
-    private final LoopRepository loopRepository;
     private final LoopMapper loopMapper;
     private final TeamRepository teamRepository;
 
@@ -182,35 +180,33 @@ public class ChatRoomServiceImpl implements ChatRoomService {
     @Override
     @Transactional
     public void leaveAllChatRooms(Long memberId) {
-        List<ChatRoom> chatRooms = chatRoomRepository.findByMemberId(memberId);
-        for (ChatRoom chatRoom : chatRooms) {
-            // 현재 멤버가 속한 ChatRoomMember 찾기
-            ChatRoomMember chatRoomMember = chatRoom.getChatRoomMembers().stream()
-                    .filter(member -> member.getMember().getId().equals(memberId))
-                    .findFirst()
-                    .orElseThrow(() -> new ServiceException(ReturnCode.USER_NOT_FOUND));
-            chatRoom.getChatRoomMembers().remove(chatRoomMember); // ChatRoomMember 제거
-            chatRoomMemberRepository.delete(chatRoomMember);
+        List<Long> roomIds = chatRoomRepository.findRoomIdsByMemberId(memberId);
+        for (Long roomId : roomIds) {
+            Long ownerId = chatRoomRepository.findOwnerId(roomId);
+            boolean iAmOwner = ownerId != null && ownerId.equals(memberId);
 
-            // 방장인지 확인
-            if (chatRoom.getMember().getId().equals(memberId)) {
-                if (chatRoom.getChatRoomMembers().size() > 1) { // 2명 이상 남아있으면 다음 방장 지정
-                    ChatRoomMember nextOwner = chatRoom.getChatRoomMembers().get(0);
-                    // 영속 상태 보장
-                    Member persistedMember = memberRepository.findById(nextOwner.getMember().getId())
-                            .orElseThrow(() -> new ServiceException(ReturnCode.USER_NOT_FOUND));
-                    chatRoom.setMember(persistedMember);
-                } else { // 1명 이하면 채팅방 삭제
-                    chatMessageService.deleteAllChatMessages(chatRoom.getId());
-                    chatRoomRepository.delete(chatRoom);
-                    continue;
-                }
-            } else if (chatRoom.getChatRoomMembers().size() < 2) { // 방장이 아닌데 나갔을 때 1명이 되면 삭제
-                chatMessageService.deleteAllChatMessages(chatRoom.getId());
-                chatRoomRepository.delete(chatRoom);
+            // 1) 내 멤버십을 DB에서 먼저 제거 (flush 자동)
+            chatRoomMemberRepository.deleteByRoomIdAndMemberId(roomId, memberId);
+
+            // 2) DB 기준으로 남은 인원 확인
+            long remain = chatRoomMemberRepository.countByChatRoom_Id(roomId);
+            if (iAmOwner && remain == 0) {
+                // 3-A) 방 삭제 케이스: 자식부터 확실히 삭제
+                chatMessageService.deleteAllChatMessages(roomId);
+                chatRoomMemberRepository.deleteAllByRoomId(roomId); // 혹시 남아있으면 제거
+                chatRoomRepository.deleteById(roomId);
                 continue;
             }
-            chatRoomRepository.save(chatRoom);
+            if (iAmOwner) {
+                // 3-B) 방장 위임
+                Long nextOwnerId = chatRoomMemberRepository.findFirstMemberId(roomId);
+                if (nextOwnerId == null) {
+                    chatMessageService.deleteAllChatMessages(roomId);
+                    chatRoomRepository.deleteById(roomId);
+                    continue;
+                }
+                chatRoomRepository.updateOwner(roomId, nextOwnerId);
+            }
         }
     }
 

@@ -13,7 +13,7 @@ import java.util.Optional;
 @Repository
 public interface ChatRoomMemberRepository extends JpaRepository<ChatRoomMember, Long> {
     // 특정 채팅방의 멤버 수 조회
-    Long countByChatRoomId(Long chatRoomId);
+    Long countByChatRoom_Id(Long chatRoomId);
 
     boolean existsByChatRoom_IdAndMember_Id(Long chatRoomId, Long memberId);
 
@@ -42,4 +42,25 @@ public interface ChatRoomMemberRepository extends JpaRepository<ChatRoomMember, 
           AND cr.isBotRoom = false
     """)
     boolean existsConnectableMember(@Param("chatRoomId") Long chatRoomId, @Param("memberId") Long memberId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+        delete from ChatRoomMember crm
+        where crm.chatRoom.id = :roomId and crm.member.id = :memberId
+    """)
+    int deleteByRoomIdAndMemberId(@Param("roomId") Long roomId, @Param("memberId") Long memberId);
+
+    // 남아있는 멤버 중 1명(방장 위임 대상)
+    @Query("""
+        select crm.member.id
+        from ChatRoomMember crm
+        where crm.chatRoom.id = :roomId
+        order by crm.id asc
+        limit 1
+    """)
+    Long findFirstMemberId(@Param("roomId") Long roomId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from ChatRoomMember crm where crm.chatRoom.id = :roomId")
+    int deleteAllByRoomId(@Param("roomId") Long roomId);
 }

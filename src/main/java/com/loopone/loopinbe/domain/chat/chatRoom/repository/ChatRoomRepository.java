@@ -31,20 +31,6 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
             ")")
     boolean existsOneOnOneChatRoom(@Param("memberId1") Long memberId1, @Param("memberId2") Long memberId2);
 
-    // 해당 채팅방의 참여자 리스트 가져오기
-    @Query("SELECT crm FROM ChatRoomMember crm JOIN FETCH crm.member WHERE crm.chatRoom.id = :chatRoomId")
-    List<ChatRoomMember> findChatRoomMembersWithMember(@Param("chatRoomId") Long chatRoomId);
-
-    // 기존 findById 대체용 (채팅방 + 참여 멤버 + 멤버 정보까지 한번에)
-    @Query("""
-        SELECT cr
-        FROM ChatRoom cr
-        JOIN FETCH cr.chatRoomMembers crm
-        JOIN FETCH crm.member
-        WHERE cr.id = :chatRoomId
-    """)
-    Optional<ChatRoom> findByIdWithMembers(@Param("chatRoomId") Long chatRoomId);
-
     // 멤버가 참여중인 모든 채팅방 조회 (N+1 방지)
     @Query("""
         SELECT DISTINCT cr
@@ -54,10 +40,6 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
         WHERE m.id = :memberId
     """)
     List<ChatRoom> findByMemberId(@Param("memberId") Long memberId);
-
-    // 해당 채팅방의 참여자id 리스트 가져오기
-    @Query("SELECT crm.member.id FROM ChatRoomMember crm WHERE crm.chatRoom.id = :chatRoomId")
-    List<Long> findParticipantMemberIds(@Param("chatRoomId") Long chatRoomId);
 
     // 참여자 권한 검증용 쿼리
     @Query("""
@@ -123,4 +105,19 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
            "LEFT JOIN FETCH l.loopRule lr " +
            "WHERE cr.id = :chatRoomId")
     Optional<ChatRoom> findByIdWithLoopAndChecklists(@Param("chatRoomId") Long chatRoomId);
+
+    // 내가 참여한 방 id만 뽑기 (엔티티 그래프 로딩 피함)
+    @Query("""
+        select distinct crm.chatRoom.id
+        from ChatRoomMember crm
+        where crm.member.id = :memberId
+    """)
+    List<Long> findRoomIdsByMemberId(@Param("memberId") Long memberId);
+
+    @Query("select cr.member.id from ChatRoom cr where cr.id = :roomId")
+    Long findOwnerId(@Param("roomId") Long roomId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update ChatRoom cr set cr.member.id = :newOwnerId where cr.id = :roomId")
+    int updateOwner(@Param("roomId") Long roomId, @Param("newOwnerId") Long newOwnerId);
 }
