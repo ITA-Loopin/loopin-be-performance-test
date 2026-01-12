@@ -42,6 +42,8 @@ public class ChatMessage extends BaseDocument {
 
     private List<LoopCreateRequest> recommendations;
 
+    private Long loopRuleId;
+
     @Indexed
     private AuthorType authorType;
     public enum AuthorType {

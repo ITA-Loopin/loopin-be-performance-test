@@ -29,6 +29,7 @@ import com.loopone.loopinbe.global.s3.S3Service;
 import com.loopone.loopinbe.global.webSocket.payload.ChatWebSocketPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.Hibernate;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -126,6 +127,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 in.content(),
                 in.attachments(),
                 in.recommendations(),
+                in.loopRuleId(),
                 in.authorType(),
                 in.createdAt(),
                 in.modifiedAt()
@@ -140,6 +142,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 saved.getContent(),
                 saved.getAttachments(),
                 saved.getRecommendations(),
+                saved.getLoopRuleId(),
                 saved.getAuthorType(),
                 isBotRoom,
                 saved.getCreatedAt(),
@@ -179,8 +182,13 @@ public class ChatMessageServiceImpl implements ChatMessageService {
             throw new ServiceException(ReturnCode.CHATMESSAGE_INVALID_TYPE);
         }
 
-        ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+        ChatRoom chatRoom = chatRoomRepository.findByIdWithLoopAndChecklists(chatRoomId)
                 .orElseThrow(() -> new ServiceException(ReturnCode.CHATROOM_NOT_FOUND));
+
+        Loop loop = chatRoom.getLoop();
+        if (loop != null && loop.getLoopRule() != null) {
+            Hibernate.initialize(loop.getLoopRule().getDaysOfWeek());
+        }
 
         ChatMessagePayload payload = toChatMessagePayload(request.clientMessageId(), chatRoomId, currentUser.id(), request.content(), null);
         ChatMessagePayload saved = processInbound(payload);
@@ -191,12 +199,11 @@ public class ChatMessageServiceImpl implements ChatMessageService {
 
         sseEmitterService.sendToClient(chatRoomId, MESSAGE, response);
 
-        Loop loop = chatRoom.getLoop();
-        LoopDetailResponse loopDetailResponse = (loop != null) ? loopMapper.toDetailResponse(loop) : null;
 
         if (request.messageType() == CREATE_LOOP) {
-            publishAI(saved, loopDetailResponse, OPEN_AI_CREATE_TOPIC);
+            publishAI(saved, null, OPEN_AI_CREATE_TOPIC);
         } else {
+            LoopDetailResponse loopDetailResponse = (loop != null) ? loopMapper.toDetailResponse(loop) : null;
             publishAI(saved, loopDetailResponse, OPEN_AI_UPDATE_TOPIC);
         }
     }
@@ -274,6 +281,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 userId,
                 content,
                 attachments,
+                null,
                 null,
                 ChatMessage.AuthorType.USER,
                 true,

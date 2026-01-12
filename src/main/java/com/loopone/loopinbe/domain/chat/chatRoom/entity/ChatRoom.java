@@ -45,4 +45,8 @@ public class ChatRoom extends BaseEntity {
     public void selectLoop(Loop loop) {
         this.loop = loop;
     }
+
+    public void updateTitle(String title) {
+        this.title = title;
+    }
 }

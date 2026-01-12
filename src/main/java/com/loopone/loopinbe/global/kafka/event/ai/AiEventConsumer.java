@@ -9,6 +9,7 @@ import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatMessagePayload;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessage;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.type.MessageType;
 import com.loopone.loopinbe.domain.chat.chatMessage.service.ChatMessageService;
+import com.loopone.loopinbe.domain.chat.chatRoom.service.ChatRoomService;
 import com.loopone.loopinbe.domain.loop.ai.dto.AiPayload;
 import com.loopone.loopinbe.domain.loop.ai.dto.res.RecommendationsLoop;
 import com.loopone.loopinbe.domain.loop.ai.service.LoopAIService;
@@ -36,6 +37,7 @@ public class AiEventConsumer {
     private final SseEmitterService sseEmitterService;
     private final ChatMessageService chatMessageService;
     private final ChatMessageConverter chatMessageConverter;
+    private final ChatRoomService chatRoomService;
 
     @KafkaListener(topics = OPEN_AI_CREATE_TOPIC, groupId = OPEN_AI_GROUP_ID, containerFactory = KAFKA_LISTENER_CONTAINER)
     public void consumeAiCreateLoop(ConsumerRecord<String, String> rec) {
@@ -74,6 +76,9 @@ public class AiEventConsumer {
 
         // 3) DB 저장
         chatMessageService.processInbound(inbound);
+
+        // 채팅방 제목 변경
+        chatRoomService.updateChatRoomTitle(req.chatRoomId(), recommendations.title());
     }
 
     private ChatMessagePayload createBotPayload(AiPayload req, RecommendationsLoop recommendationsLoop, String message) {
@@ -85,6 +90,7 @@ public class AiEventConsumer {
                 message,
                 null,
                 recommendationsLoop.recommendations(),
+                recommendationsLoop.loopRuleId(),
                 ChatMessage.AuthorType.BOT,
                 true,
                 Instant.now(),

@@ -116,4 +116,11 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
     order by cr.lastMessageAt desc
 """)
     List<ChatRoomMember> findTeamChatRooms(@Param("memberId") Long memberId);
+
+    @Query("SELECT DISTINCT cr FROM ChatRoom cr " +
+           "LEFT JOIN FETCH cr.loop l " +
+           "LEFT JOIN FETCH l.loopChecklists " +
+           "LEFT JOIN FETCH l.loopRule lr " +
+           "WHERE cr.id = :chatRoomId")
+    Optional<ChatRoom> findByIdWithLoopAndChecklists(@Param("chatRoomId") Long chatRoomId);
 }

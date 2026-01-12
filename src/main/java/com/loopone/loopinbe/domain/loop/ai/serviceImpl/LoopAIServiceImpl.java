@@ -9,8 +9,10 @@ import com.loopone.loopinbe.domain.loop.loop.mapper.LoopMapper;
 import com.loopone.loopinbe.domain.loop.loop.repository.LoopRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -41,9 +43,10 @@ public class LoopAIServiceImpl implements LoopAIService {
     }
 
     @Override
+    @Transactional
     public CompletableFuture<RecommendationsLoop> chat(AiPayload request) {
         log.info("OpenAI 요청 처리 시작: requestId={}", request.clientMessageId());
-        
+
         AiPayload finalRequest = request;
 
         if (request.loopDetailResponse() != null && request.loopDetailResponse().loopRule() != null) {
@@ -52,6 +55,9 @@ public class LoopAIServiceImpl implements LoopAIService {
                     .orElse(null);
 
             if (relevantLoop != null) {
+                if (relevantLoop.getLoopRule() != null) {
+                    Hibernate.initialize(relevantLoop.getLoopRule().getDaysOfWeek());
+                }
                 LoopDetailResponse updatedResponse = loopMapper.toDetailResponse(relevantLoop);
                 finalRequest = new AiPayload(
                         request.clientMessageId(),
