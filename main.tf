@@ -259,7 +259,7 @@ EOF
 
 # S3 버킷 생성
 resource "aws_s3_bucket" "loopin_bucket" {
-  bucket = var.s3_bucket_name != null ? var.s3_bucket_name : "loopin-bucket-test-v1"
+  bucket = var.s3_bucket_name != null ? var.s3_bucket_name : "loopin-bucket-v1"
 
   tags = {
     Name = "${var.prefix}-bucket"
