@@ -166,10 +166,6 @@ public class LoopServiceImpl implements LoopService {
                 }
             }
         }
-
-        if (requestDTO.chatRoomId() != null) {
-            linkLoopToChatRoom(requestDTO.chatRoomId(), loop);
-        }
     }
 
     // 루프 그룹 전체 수정

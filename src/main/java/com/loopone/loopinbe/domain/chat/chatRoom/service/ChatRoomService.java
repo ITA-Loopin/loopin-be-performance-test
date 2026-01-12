@@ -19,6 +19,8 @@ public interface ChatRoomService {
     // AI 채팅방 생성
     ChatRoomResponse createAiChatRoom(Long userId);
 
+    void updateChatRoomTitle(Long chatRoomId, String title);
+
     // 팀 채팅방 생성
     void createTeamChatRoom(Long userId, Team team, List<Member> members);
 

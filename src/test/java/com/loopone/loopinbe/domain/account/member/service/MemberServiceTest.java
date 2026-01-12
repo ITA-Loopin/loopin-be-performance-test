@@ -16,6 +16,7 @@ import com.loopone.loopinbe.domain.account.member.repository.MemberFollowReposit
 import com.loopone.loopinbe.domain.account.member.repository.MemberFollowReqRepository;
 import com.loopone.loopinbe.domain.account.member.repository.MemberRepository;
 import com.loopone.loopinbe.domain.account.member.serviceImpl.MemberServiceImpl;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.chat.chatRoom.service.ChatRoomService;
 import com.loopone.loopinbe.domain.loop.loop.service.LoopService;
 import com.loopone.loopinbe.domain.notification.dto.NotificationPayload;
@@ -43,6 +44,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -295,11 +297,15 @@ class MemberServiceTest {
     // =========================================================
     @Nested
     class UpdateMember {
+        private static final String OLD_URL = "https://cdn.loop.in/profile-images/old.png";
+        private static final String OLD_KEY = "profile-images/old.png";
+        private static final String NEW_KEY = "profile-images/new.png";
+        private static final String NEW_URL = "http://new";
 
         @Test
         @DisplayName("닉네임 중복이면 NICKNAME_ALREADY_USED")
         void nicknameDuplicate() {
-            var me = persistMember("me@loop.in", "me", "http://old");
+            var me = persistMember("me@loop.in", "me", OLD_URL);
             persistMember("x@loop.in", "dup", null);
 
             var dto = cu(me);
@@ -313,7 +319,7 @@ class MemberServiceTest {
         @Test
         @DisplayName("MAINTAIN: 프로필 이미지 유지(업로드 파일이 와도 무시)")
         void maintain() {
-            var me = persistMember("me@loop.in", "me", "http://old");
+            var me = persistMember("me@loop.in", "me", OLD_URL);
             var dto = cu(me);
 
             var file = new MockMultipartFile(
@@ -327,18 +333,23 @@ class MemberServiceTest {
 
             var reloaded = memberRepository.findById(me.getId()).orElseThrow();
             assertThat(reloaded.getNickname()).isEqualTo("me2");
-            assertThat(reloaded.getProfileImageUrl()).isEqualTo("http://old");
+            assertThat(reloaded.getProfileImageUrl()).isEqualTo(OLD_URL);
             then(s3Service).shouldHaveNoInteractions();
         }
 
         @Test
         @DisplayName("UPDATE: 기존 이미지 삭제 후 새 이미지 업로드")
         void update() throws Exception {
-            var me = persistMember("me@loop.in", "me", "http://old");
+            var me = persistMember("me@loop.in", "me", OLD_URL);
             var dto = cu(me);
 
-            given(s3Service.uploadImageFile(any(), eq("profile-image")))
-                    .willReturn("http://new");
+            // uploadChatImage -> ChatAttachment(key)
+            ChatAttachment uploaded = mock(ChatAttachment.class);
+            given(uploaded.key()).willReturn(NEW_KEY);
+            given(s3Service.uploadChatImage(any(MultipartFile.class), eq("profile-images")))
+                    .willReturn(uploaded);
+            given(s3Service.toPublicUrl(NEW_KEY))
+                    .willReturn(NEW_URL);
 
             var file = new MockMultipartFile(
                     "image", "a.png", "image/png",
@@ -353,14 +364,16 @@ class MemberServiceTest {
             assertThat(reloaded.getProfileImageUrl()).isEqualTo("http://new");
             assertThat(reloaded.getNickname()).isEqualTo("me2");
 
-            then(s3Service).should().deleteFile("http://old");
-            then(s3Service).should().uploadImageFile(any(), eq("profile-image"));
+            // 검증: 업로드 -> public url 변환 -> 기존 key 삭제가 호출되었는지
+            then(s3Service).should().uploadChatImage(any(MultipartFile.class), eq("profile-images"));
+            then(s3Service).should().toPublicUrl(NEW_KEY);
+            then(s3Service).should().deleteObjectByKey(OLD_KEY);
         }
 
         @Test
         @DisplayName("UPDATE: 파일 없으면 PROFILE_IMAGE_REQUIRED")
         void update_requiresFile() {
-            var me = persistMember("me@loop.in", "me", "http://old");
+            var me = persistMember("me@loop.in", "me", OLD_URL);
             var dto = cu(me);
 
             var req = new MemberUpdateRequest("me2", ProfileImageState.UPDATE);
@@ -373,11 +386,11 @@ class MemberServiceTest {
         @Test
         @DisplayName("UPDATE: 업로드 중 IOException -> INTERNAL_ERROR")
         void update_ioException() throws Exception {
-            var me = persistMember("me@loop.in", "me", "http://old");
+            var me = persistMember("me@loop.in", "me", OLD_URL);
             var dto = cu(me);
 
             willThrow(new IOException("boom"))
-                    .given(s3Service).uploadImageFile(any(), eq("profile-image"));
+                    .given(s3Service).uploadChatImage(any(MultipartFile.class), eq("profile-images"));
 
             var file = new MockMultipartFile(
                     "image", "a.png", "image/png",
@@ -389,12 +402,18 @@ class MemberServiceTest {
             assertThatThrownBy(() -> memberService.updateMember(req, file, dto))
                     .isInstanceOf(ServiceException.class)
                     .extracting("returnCode").isEqualTo(ReturnCode.INTERNAL_ERROR);
+
+            // 업로드 실패면 이후 단계 호출 X
+            then(s3Service).should().uploadChatImage(any(MultipartFile.class), eq("profile-images"));
+            then(s3Service).should(never()).toPublicUrl(anyString());
+            then(s3Service).should(never()).deleteObjectByKey(anyString());
         }
 
         @Test
         @DisplayName("DELETE: 기존 이미지 삭제 후 빈 문자열로 세팅")
-        void delete() {
-            var me = persistMember("me@loop.in", "me", "http://old");
+        void delete() throws IOException {
+            var me = persistMember("me@loop.in", "me", OLD_URL);
+
             var dto = cu(me);
 
             var req = new MemberUpdateRequest("me2", ProfileImageState.DELETE);
@@ -402,8 +421,12 @@ class MemberServiceTest {
             memberService.updateMember(req, null, dto);
 
             var reloaded = memberRepository.findById(me.getId()).orElseThrow();
+            assertThat(reloaded.getNickname()).isEqualTo("me2");
             assertThat(reloaded.getProfileImageUrl()).isEqualTo("");
-            then(s3Service).should().deleteFile("http://old");
+
+            then(s3Service).should().deleteObjectByKey(OLD_KEY);
+            then(s3Service).should(never()).uploadChatImage(any(), anyString());
+            then(s3Service).should(never()).toPublicUrl(anyString());
         }
     }
 

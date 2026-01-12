@@ -21,8 +21,9 @@ public class ChatMessageResponse {
     private String nickname;
     private String profileImageUrl;
     private String content;
-    private List<String> attachmentUrls;
+    private List<ChatAttachmentResponse> attachments;
     private List<LoopCreateRequest> recommendations;
+    private Long loopRuleId;
     private ChatMessage.AuthorType authorType;
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Instant createdAt;

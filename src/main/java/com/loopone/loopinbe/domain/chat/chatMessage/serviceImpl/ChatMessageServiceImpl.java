@@ -3,6 +3,7 @@ package com.loopone.loopinbe.domain.chat.chatMessage.serviceImpl;
 import com.loopone.loopinbe.domain.account.auth.currentUser.CurrentUserDto;
 import com.loopone.loopinbe.domain.account.member.entity.Member;
 import com.loopone.loopinbe.domain.chat.chatMessage.converter.ChatMessageConverter;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.res.ChatMessageResponse;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatMessagePayload;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.req.ChatMessageRequest;
@@ -11,6 +12,7 @@ import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessagePage;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.type.MessageType;
 import com.loopone.loopinbe.domain.chat.chatMessage.repository.ChatMessageMongoRepository;
 import com.loopone.loopinbe.domain.chat.chatMessage.service.ChatMessageService;
+import com.loopone.loopinbe.domain.chat.chatMessage.validator.AttachmentValidator;
 import com.loopone.loopinbe.domain.chat.chatRoom.entity.ChatRoom;
 import com.loopone.loopinbe.domain.chat.chatRoom.repository.ChatRoomRepository;
 import com.loopone.loopinbe.domain.loop.ai.dto.AiPayload;
@@ -27,6 +29,7 @@ import com.loopone.loopinbe.global.s3.S3Service;
 import com.loopone.loopinbe.global.webSocket.payload.ChatWebSocketPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.Hibernate;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -122,8 +125,9 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 in.chatRoomId(),
                 in.memberId(),
                 in.content(),
-                in.attachmentUrls(),
+                in.attachments(),
                 in.recommendations(),
+                in.loopRuleId(),
                 in.authorType(),
                 in.createdAt(),
                 in.modifiedAt()
@@ -136,8 +140,9 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 saved.getChatRoomId(),
                 in.memberId(),
                 saved.getContent(),
-                saved.getAttachmentUrls(),
+                saved.getAttachments(),
                 saved.getRecommendations(),
+                saved.getLoopRuleId(),
                 saved.getAuthorType(),
                 isBotRoom,
                 saved.getCreatedAt(),
@@ -177,8 +182,13 @@ public class ChatMessageServiceImpl implements ChatMessageService {
             throw new ServiceException(ReturnCode.CHATMESSAGE_INVALID_TYPE);
         }
 
-        ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+        ChatRoom chatRoom = chatRoomRepository.findByIdWithLoopAndChecklists(chatRoomId)
                 .orElseThrow(() -> new ServiceException(ReturnCode.CHATROOM_NOT_FOUND));
+
+        Loop loop = chatRoom.getLoop();
+        if (loop != null && loop.getLoopRule() != null) {
+            Hibernate.initialize(loop.getLoopRule().getDaysOfWeek());
+        }
 
         ChatMessagePayload payload = toChatMessagePayload(request.clientMessageId(), chatRoomId, currentUser.id(), request.content(), null);
         ChatMessagePayload saved = processInbound(payload);
@@ -189,12 +199,11 @@ public class ChatMessageServiceImpl implements ChatMessageService {
 
         sseEmitterService.sendToClient(chatRoomId, MESSAGE, response);
 
-        Loop loop = chatRoom.getLoop();
-        LoopDetailResponse loopDetailResponse = (loop != null) ? loopMapper.toDetailResponse(loop) : null;
 
         if (request.messageType() == CREATE_LOOP) {
-            publishAI(saved, loopDetailResponse, OPEN_AI_CREATE_TOPIC);
+            publishAI(saved, null, OPEN_AI_CREATE_TOPIC);
         } else {
+            LoopDetailResponse loopDetailResponse = (loop != null) ? loopMapper.toDetailResponse(loop) : null;
             publishAI(saved, loopDetailResponse, OPEN_AI_UPDATE_TOPIC);
         }
     }
@@ -202,38 +211,55 @@ public class ChatMessageServiceImpl implements ChatMessageService {
     // 해당 채팅방에서 파일 메시지 전송 [참여자 권한]
     @Override
     @Transactional
-    public void sendAttachment(Long chatRoomId, UUID clientMessageId, List<MultipartFile> attachments, CurrentUserDto currentUser) {
-        // 참여자 검증 (통일)
+    public void sendAttachment(Long chatRoomId, UUID clientMessageId, List<MultipartFile> images, List<MultipartFile> files, CurrentUserDto currentUser) {
+        // 참여자 검증
         boolean memberExists = chatRoomRepository.existsMember(chatRoomId, currentUser.id());
         if (!memberExists) throw new ServiceException(ReturnCode.NOT_AUTHORIZED);
         // 파일 검증
-        if (attachments == null || attachments.isEmpty() || attachments.size() > 5) {
-            throw new ServiceException(ReturnCode.FILE_UPLOAD_ERROR);
-        }
-        // S3 업로드
-        List<String> attachmentUrls = new ArrayList<>();
-        for (MultipartFile attachment : attachments) {
-            if (attachment == null || attachment.isEmpty()) continue;
-            try {
-                String imageUrl = s3Service.uploadImageFile(attachment, "chat-images");
-                attachmentUrls.add(imageUrl);
-            } catch (IOException e) {
-                log.error("S3 upload failed. chatRoomId={}, userId={}, fileName={}",
-                        chatRoomId, currentUser.id(), attachment.getOriginalFilename(), e);
-                throw new ServiceException(ReturnCode.INTERNAL_ERROR);
+        AttachmentValidator.validateImages(images);
+        AttachmentValidator.validateFiles(files);
+        boolean hasAny = (images != null && images.stream().anyMatch(f -> f != null && !f.isEmpty()))
+                        || (files != null && files.stream().anyMatch(f -> f != null && !f.isEmpty()));
+        if (!hasAny) throw new ServiceException(ReturnCode.FILE_UPLOAD_ERROR);
+        // 3) S3 업로드
+        List<ChatAttachment> uploaded = new ArrayList<>();
+        try {
+            // images
+            if (images != null) {
+                for (MultipartFile img : images) {
+                    if (img == null || img.isEmpty()) continue;
+                    uploaded.add(s3Service.uploadChatImage(img, "chat-images"));
+                }
             }
+            // files
+            if (files != null) {
+                for (MultipartFile f : files) {
+                    if (f == null || f.isEmpty()) continue;
+                    uploaded.add(s3Service.uploadChatFile(f, "chat-files"));
+                }
+            }
+            if (uploaded.isEmpty()) throw new ServiceException(ReturnCode.FILE_UPLOAD_ERROR);
+            // 4) Payload 생성/저장
+            ChatMessagePayload payload = toChatMessagePayload(
+                    clientMessageId,
+                    chatRoomId,
+                    currentUser.id(),
+                    null,
+                    uploaded
+            );
+            ChatMessagePayload saved = processInbound(payload);
+            // 5) Response 변환
+            Map<Long, Member> memberMap = chatMessageConverter.loadMembersFromPayload(List.of(saved));
+            ChatMessageResponse response = chatMessageConverter.toChatMessageResponse(saved, memberMap);
+            // 6) 이벤트 발행
+            publishAttachmentMessage(chatRoomId, saved.clientMessageId(), response);
+        } catch (RuntimeException | IOException e) {
+            // S3 업로드는 트랜잭션 롤백이 안 되므로 보상 삭제
+            List<String> keys = uploaded.stream().map(ChatAttachment::key).toList();
+            s3Service.deleteAllByKeys(keys);
+            if (e instanceof ServiceException se) throw se;
+            throw new ServiceException(ReturnCode.INTERNAL_ERROR);
         }
-        if (attachmentUrls.isEmpty()) throw new ServiceException(ReturnCode.FILE_UPLOAD_ERROR);
-        // Payload 생성
-        ChatMessagePayload payload = toChatMessagePayload(clientMessageId, chatRoomId, currentUser.id(), null, attachmentUrls);
-        ChatMessagePayload saved = processInbound(payload);
-
-        // ChatMessagePayload -> ChatMessageResponse
-        Map<Long, Member> memberMap = chatMessageConverter.loadMembersFromPayload(List.of(saved));
-        ChatMessageResponse response = chatMessageConverter.toChatMessageResponse(saved, memberMap);
-
-        // 파일 메시지 생성 이벤트 발행
-        publishAttachmentMessage(chatRoomId, saved.clientMessageId(), response);
     }
 
     // ----------------- 헬퍼 메서드 -----------------
@@ -246,7 +272,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         }
     }
 
-    private ChatMessagePayload toChatMessagePayload(UUID clientMessageId, Long chatRoomId, Long userId, String content, List<String> attachmentUrls) {
+    private ChatMessagePayload toChatMessagePayload(UUID clientMessageId, Long chatRoomId, Long userId, String content, List<ChatAttachment> attachments) {
         String id = "u:" + clientMessageId;
         return new ChatMessagePayload(
                 id,
@@ -254,7 +280,8 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 chatRoomId,
                 userId,
                 content,
-                attachmentUrls,
+                attachments,
+                null,
                 null,
                 ChatMessage.AuthorType.USER,
                 true,

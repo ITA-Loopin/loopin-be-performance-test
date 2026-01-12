@@ -1,5 +1,6 @@
 package com.loopone.loopinbe.domain.chat.chatMessage.entity;
 
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.loop.loop.dto.req.LoopCreateRequest;
 import com.loopone.loopinbe.global.mongo.BaseDocument;
 import jakarta.persistence.*;
@@ -37,9 +38,11 @@ public class ChatMessage extends BaseDocument {
 
     private String content;
 
-    private List<String> attachmentUrls;
+    private List<ChatAttachment> attachments;
 
     private List<LoopCreateRequest> recommendations;
+
+    private Long loopRuleId;
 
     @Indexed
     private AuthorType authorType;
