@@ -87,7 +87,7 @@ services:
       - loopin-backend
 
   app:
-    image: junhui9789/loopin-app:latest
+    image: junhui9789/loopin-test-app:latest
     container_name: loopin-app
     ports:
       - "8080:8080"
