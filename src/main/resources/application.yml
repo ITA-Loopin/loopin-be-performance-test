@@ -20,7 +20,7 @@ spring:
       region:
         static: ap-northeast-2  # AWS 서울 리전
       s3:
-        bucket: loopin-s3-bucket-v1 # S3 버킷명
+        bucket: loopin-bucket-test-v1 # S3 버킷명
   security:
     oauth2:
       client:
