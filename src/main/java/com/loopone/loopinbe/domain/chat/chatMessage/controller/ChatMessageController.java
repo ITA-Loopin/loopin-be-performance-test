@@ -61,10 +61,11 @@ public class ChatMessageController {
     @PostMapping(value ="/attachments/{chatRoomId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "채팅방에 파일 메시지 전송", description = "채팅방에 파일 메시지를 전송합니다.")
     public ApiResponse<Void> sendAttachment(@PathVariable("chatRoomId") Long chatRoomId,
-                                      @RequestPart("request") @Valid AttachmentRequest attachmentRequest,
-                                      @RequestPart(value = "attachments", required = false) List<MultipartFile> attachments,
-                                      @CurrentUser CurrentUserDto currentUser) {
-        chatMessageService.sendAttachment(chatRoomId, attachmentRequest.clientMessageId(), attachments, currentUser);
+                                            @RequestPart(value = "attachmentRequest") @Valid AttachmentRequest attachmentRequest,
+                                            @RequestPart(value = "images", required = false) List<MultipartFile> images,
+                                            @RequestPart(value = "files", required = false) List<MultipartFile> files,
+                                            @CurrentUser CurrentUserDto currentUser) {
+        chatMessageService.sendAttachment(chatRoomId, attachmentRequest.clientMessageId(), images, files, currentUser);
         return ApiResponse.success();
     }
 }

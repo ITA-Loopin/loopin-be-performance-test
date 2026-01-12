@@ -1,5 +1,6 @@
 package com.loopone.loopinbe.domain.chat.chatMessage.repository;
 
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessage;
 import com.loopone.loopinbe.domain.loop.loop.dto.req.LoopCreateRequest;
 import org.springframework.data.domain.Page;
@@ -16,7 +17,7 @@ public interface ChatMessageMongoRepositoryCustom {
             Long chatRoomId,
             Long memberId,
             String content,
-            List<String> imageUrls,
+            List<ChatAttachment> attachments,
             List<LoopCreateRequest> recommendations,
             ChatMessage.AuthorType authorType,
             Instant createdAt,

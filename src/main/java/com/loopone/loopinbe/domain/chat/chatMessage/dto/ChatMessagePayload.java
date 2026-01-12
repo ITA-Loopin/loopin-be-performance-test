@@ -13,7 +13,7 @@ public record ChatMessagePayload(
         Long chatRoomId,
         Long memberId,
         String content,
-        List<String> attachmentUrls,
+        List<ChatAttachment> attachments,
         List<LoopCreateRequest> recommendations,
         ChatMessage.AuthorType authorType,
         boolean isBotRoom,

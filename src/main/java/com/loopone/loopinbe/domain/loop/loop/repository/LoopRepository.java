@@ -33,6 +33,9 @@ public interface LoopRepository extends JpaRepository<Loop, Long> {
     //LoopRule 객체로 첫 번째 루프 찾기
     Optional<Loop> findFirstByLoopRule(LoopRule loopRule);
 
+    // loopRuleId로 오늘 포함 가장 가까운 미래의 루프 찾기 (AI 업데이트 프롬프트용)
+    Optional<Loop> findFirstByLoopRuleIdAndLoopDateGreaterThanEqualOrderByLoopDateAsc(Long loopRuleId, LocalDate date);
+
     //loopRule에 속한 루프 전체를 리스트로 조회 (오늘 포함 미래만 조회)
     @Query("""
         SELECT l

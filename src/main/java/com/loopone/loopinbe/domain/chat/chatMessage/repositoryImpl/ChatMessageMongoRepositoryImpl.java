@@ -1,5 +1,6 @@
 package com.loopone.loopinbe.domain.chat.chatMessage.repositoryImpl;
 
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessage;
 import com.loopone.loopinbe.domain.chat.chatMessage.repository.ChatMessageMongoRepositoryCustom;
 import com.loopone.loopinbe.domain.loop.loop.dto.req.LoopCreateRequest;
@@ -14,7 +15,6 @@ import org.springframework.data.mongodb.core.query.*;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
@@ -30,7 +30,7 @@ public class ChatMessageMongoRepositoryImpl implements ChatMessageMongoRepositor
             Long chatRoomId,
             Long memberId,
             String content,
-            List<String> imageUrls,
+            List<ChatAttachment> attachments,
             List<LoopCreateRequest> recommendations,
             ChatMessage.AuthorType authorType,
             Instant createdAt,
@@ -44,7 +44,7 @@ public class ChatMessageMongoRepositoryImpl implements ChatMessageMongoRepositor
                 .setOnInsert("chatRoomId", chatRoomId)
                 .setOnInsert("memberId", memberId)
                 .setOnInsert("content", content)
-                .setOnInsert("imageUrls", imageUrls)
+                .setOnInsert("attachments", attachments)
                 .setOnInsert("recommendations", recommendations)
                 .setOnInsert("authorType", authorType)
                 .setOnInsert("createdAt", createdAt)
