@@ -20,11 +20,7 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     // 해당 사용자가 팀 멤버인지 확인
     boolean existsByTeamIdAndMemberId(Long teamId, Long memberId);
 
-    @Query("select tm.member from TeamMember tm " +
-            "where tm.team.id = :teamId and tm.member.id <> :memberId " +
-            "order by tm.id asc")
-    Optional<Member> findFirstMemberByTeamIdAndMemberIdNot(
-            @Param("teamId") Long teamId, @Param("memberId") Long memberId);
+    Optional<TeamMember> findFirstByTeam_IdAndMember_IdNotOrderByIdAsc(Long teamId, Long memberId);
 
     //sortOrder 우선 정렬, null이면 createdAt DESC로 정렬
     @Query("""
