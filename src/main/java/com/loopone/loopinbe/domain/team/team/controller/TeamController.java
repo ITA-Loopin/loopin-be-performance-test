@@ -8,13 +8,17 @@ import com.loopone.loopinbe.domain.team.team.dto.res.MyTeamResponse;
 import com.loopone.loopinbe.domain.team.team.dto.res.RecruitingTeamResponse;
 import com.loopone.loopinbe.domain.team.team.dto.res.TeamDetailResponse;
 import com.loopone.loopinbe.domain.team.team.dto.res.TeamMemberResponse;
+import com.loopone.loopinbe.domain.team.team.entity.TeamPage;
 import com.loopone.loopinbe.domain.team.team.service.TeamService;
 import com.loopone.loopinbe.global.common.response.ApiResponse;
+import com.loopone.loopinbe.global.common.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -51,9 +55,11 @@ public class TeamController {
     @GetMapping("/recruiting")
     @Operation(summary = "모집 중인 팀 리스트 조회", description = "참여 가능한 다른 팀 리스트를 조회합니다.")
     public ApiResponse<List<RecruitingTeamResponse>> getRecruitingTeams(
+            @ModelAttribute TeamPage request,
             @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser
     ) {
-        List<RecruitingTeamResponse> response = teamService.getRecruitingTeams(currentUser);
+        Pageable pageable = PageRequest.of(request.getPage(), request.getSize());
+        PageResponse<RecruitingTeamResponse> response = teamService.getRecruitingTeams(pageable, currentUser);
         return ApiResponse.success(response);
     }
 

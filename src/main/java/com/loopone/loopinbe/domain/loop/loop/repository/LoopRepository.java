@@ -85,8 +85,8 @@ public interface LoopRepository extends JpaRepository<Loop, Long> {
 
     // 특정 기간 내에 내 루프가 존재하는 날짜만 조회
     @Query("""
-        SELECT DISTINCT l.loopDate FROM Loop l 
-        WHERE l.member.id = :memberId 
+        SELECT DISTINCT l.loopDate FROM Loop l
+        WHERE l.member.id = :memberId
         AND l.loopDate BETWEEN :startDate AND :endDate
     """)
     List<LocalDate> findLoopDatesByMemberIdAndDateRange(

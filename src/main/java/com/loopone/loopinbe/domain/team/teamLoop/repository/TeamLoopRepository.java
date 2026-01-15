@@ -43,4 +43,16 @@ public interface TeamLoopRepository extends JpaRepository<TeamLoop, Long> {
     """)
     List<Long> findDistinctLoopRuleIdsByTeamIds(@Param("teamIds") List<Long> teamIds);
 
+    @Query("""
+        SELECT DISTINCT tl.loopDate
+        FROM TeamLoop tl
+        WHERE tl.team.id = :teamId
+          AND tl.loopDate BETWEEN :startDate AND :endDate
+        ORDER BY tl.loopDate ASC
+    """)
+    List<LocalDate> findTeamLoopDatesByTeamIdAndDateRange(
+            @Param("teamId") Long teamId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
 }

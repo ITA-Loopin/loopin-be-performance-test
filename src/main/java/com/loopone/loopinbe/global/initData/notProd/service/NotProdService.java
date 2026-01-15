@@ -19,7 +19,7 @@ public class NotProdService {
     private final NotProdLoopService notProdLoopService;
     private final NotProdTeamService notProdTeamService;
     private final NotProdTeamLoopService notProdTeamLoopService;
-    private List<String> memberEmails = new ArrayList<>();
+    private final List<String> memberEmails = new ArrayList<>();
 
     // 1) 가데이터 생성 메서드
     public void initDummyDataTransactional() {
@@ -27,17 +27,26 @@ public class NotProdService {
 //        notProdLoopService.createWeekLoops();
 //        notProdLoopService.completeScenario_1_1();
 //        notProdLoopService.completeScenario_1_2();
-        notProdLoopService.createMonthLoops();
+        notProdLoopService.createMonthLoops(1, 1);
 //        notProdLoopService.completeScenario_2_1();
 //        notProdLoopService.completeScenario_2_2();
         NotProdTeamService.SeedTeamsResult seedTeamsResult= notProdTeamService.createTeams();
         notProdTeamLoopService.createTeamLoops(seedTeamsResult.team1Id(), seedTeamsResult.team2Id());
     }
 
+    // 성능 테스트용 가데이터 생성 메서드
+    public void initTestDataTransactional() {
+        notProdMemberService.createTestMembers(memberEmails);
+        notProdLoopService.createMonthLoops(1, 1000);
+        NotProdTeamService.SeedTestTeamsResult seedTestTeamsResult = notProdTeamService.createTestTeams();
+        notProdTeamLoopService.createTestTeamLoops(seedTestTeamsResult.teamIds());
+    }
+
     // 2) 가데이터 정보 출력
     public void initDummyData() {
         long start = System.currentTimeMillis();
-        initDummyDataTransactional();
+        initDummyDataTransactional();   // 일반 가데이터
+//        initTestDataTransactional();  // 성능 테스트용 가데이터
         long end = System.currentTimeMillis();
         long executionTimeMillis = end - start;
         NotProdPrintService.printTestAccounts(

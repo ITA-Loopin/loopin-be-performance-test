@@ -31,5 +31,5 @@ public class ChatWebSocketPayload {
     private Instant lastReadAt;
 
     // DELETE일 때만 존재
-    private Long deleteId;
+    private String deleteId;
 }

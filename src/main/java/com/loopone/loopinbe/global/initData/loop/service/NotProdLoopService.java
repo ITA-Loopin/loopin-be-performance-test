@@ -13,6 +13,7 @@ import com.loopone.loopinbe.domain.loop.loopChecklist.entity.LoopChecklist;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
@@ -30,6 +31,7 @@ public class NotProdLoopService {
     private final MemberRepository memberRepository;
     private final MemberConverter memberConverter;
     private static final String USER1_EMAIL = "user1@example.com";
+    private static final String USER_EMAIL_FORMAT = "user%d@example.com";
     private static final String LOOP_TRAVEL = "강릉 당일치기";
     private static final String LOOP_RUNNING = "동계 런닝 훈련";
     private static final String LOOP_TOEIC = "토익 공부하기";
@@ -156,14 +158,39 @@ public class NotProdLoopService {
         log.info("[NotProd] completeScenario_1_2 done");
     }
 
-    // [유저 1이 월간 루프 생성]
-    // 0) 단일 루프(2025-12-25)
+    // [유저 N이 월간 루프 생성]
+    // 0) 단일 루프(당일)
     // 1) 반복 루프(주 2회: 월/수, 이번달 내내) - 동계 런닝 훈련
     // 2) 반복 루프(주 2회: 월/수, 이번달 내내) - 토익 공부하기
     // 3) 반복 루프(주 1회: 화, 이번달 내내) - 코딩 테스트 준비
-    @Transactional
-    public void createMonthLoops() {
-        CurrentUserDto user1 = user1CurrentUser();
+    public void createMonthLoops(int fromUserNo, int toUserNo) {
+        if (fromUserNo <= 0 || toUserNo <= 0) {
+            throw new IllegalArgumentException("userNo must be positive. from=" + fromUserNo + ", to=" + toUserNo);
+        }
+        if (fromUserNo > toUserNo) {
+            throw new IllegalArgumentException("fromUserNo must be <= toUserNo. from=" + fromUserNo + ", to=" + toUserNo);
+        }
+        int success = 0;
+        int fail = 0;
+
+        for (int userNo = fromUserNo; userNo <= toUserNo; userNo++) {
+            try {
+                createMonthLoopsForUser(userNo); // 유저 단위 트랜잭션
+                success++;
+            } catch (Exception e) {
+                fail++;
+                log.warn("[NotProd] createMonthLoops failed for userNo={} (email={}). reason={}",
+                        userNo, userEmail(userNo), e.getMessage(), e);
+            }
+        }
+        log.info("[NotProd] createMonthLoops range done. from={}, to={}, success={}, fail={}",
+                fromUserNo, toUserNo, success, fail);
+    }
+
+    // 유저 한 명 단위로 트랜잭션 분리 (배치 안정성)
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void createMonthLoopsForUser(int userNo) {
+        CurrentUserDto user = userCurrentUser(userNo);
         LocalDate today = LocalDate.now();
         LocalDate thisMonthStart = today.with(TemporalAdjusters.firstDayOfMonth());
         LocalDate thisMonthEnd = today.with(TemporalAdjusters.lastDayOfMonth());
@@ -186,12 +213,12 @@ public class NotProdLoopService {
                         List.of("주문진 해수욕장"),
                         null
                 ),
-                user1
+                user
         );
-        // 1) 반복 루프: 동계 런닝 훈련 (월/수)
+        // 1) 반복 루프: 동계 런닝 훈련 (월/수) - 이번달 내내
         loopService.createLoop(
                 new LoopCreateRequest(
-                        "동계 런닝 훈련",
+                        LOOP_RUNNING,
                         "3km 10분 달성 목표",
                         RepeatType.WEEKLY,
                         null,
@@ -201,12 +228,12 @@ public class NotProdLoopService {
                         List.of("런닝 전 스트레칭", "아침에 3km 런닝", "런닝 후 1km 조깅", "마무리 스트레칭", "런닝 후 샐러드 건강식 먹기"),
                         null
                 ),
-                user1
+                user
         );
-        // 2) 반복 루프: 토익 공부하기 (월/수)
+        // 2) 반복 루프: 토익 공부하기 (월/수) - 이번달 내내
         loopService.createLoop(
                 new LoopCreateRequest(
-                        "토익 공부하기",
+                        LOOP_TOEIC,
                         "950점 목표",
                         RepeatType.WEEKLY,
                         null,
@@ -216,12 +243,12 @@ public class NotProdLoopService {
                         List.of("아침에 오답단어 복습", "듣기 연습", "기출 1회 풀기", "오답노트하기", "오답 단어 1회독"),
                         null
                 ),
-                user1
+                user
         );
         // 3) 반복 루프: 코딩 테스트 준비 (화)
         loopService.createLoop(
                 new LoopCreateRequest(
-                        "코딩 테스트 준비",
+                        LOOP_CODING,
                         "1일 1회 기출 풀기",
                         RepeatType.WEEKLY,
                         null,
@@ -231,9 +258,9 @@ public class NotProdLoopService {
                         List.of("카카오 기출 1회 풀기"),
                         null
                 ),
-                user1
+                user
         );
-        log.info("[NotProd] createMonthLoops done for user1={}", USER1_EMAIL);
+        log.info("[NotProd] createMonthLoops done for userNo={} email={}", userNo, userEmail(userNo));
     }
 
     // [유저 1이 체크리스트 완료 처리(2)-1(잘한 루프 선정 검증)]
@@ -308,6 +335,17 @@ public class NotProdLoopService {
     }
 
     // ----------------- 헬퍼 메서드 -----------------
+
+    private String userEmail(int userNo) {
+        return USER_EMAIL_FORMAT.formatted(userNo);
+    }
+
+    private CurrentUserDto userCurrentUser(int userNo) {
+        String email = userEmail(userNo);
+        Member user = memberRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalStateException("user not found: " + email));
+        return memberConverter.toCurrentUserDto(user);
+    }
 
     private CurrentUserDto user1CurrentUser() {
         Member user1 = memberRepository.findByEmail(USER1_EMAIL)

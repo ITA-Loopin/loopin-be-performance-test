@@ -76,8 +76,6 @@ public class Member extends BaseEntity {
                 default:       return NONE;
             }
         }
-        // 카카오 특이 로직 분기용
-        public boolean isKakao() { return this == KAKAO; }
         // application.yml 내 providers 맵 key 접근용 (google/kakao/naver)
         public String key() { return name().toLowerCase(); }
     }

@@ -10,7 +10,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.annotation.Order;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
@@ -22,11 +21,10 @@ public class OpenAiProvider extends AbstractAiProvider {
     private final ChatClient chatClient;
 
     public OpenAiProvider(
-            RedisTemplate<String, Object> redisTemplate,
             ObjectMapper objectMapper,
             @Qualifier("openAiChatModel") ChatModel gptChatModel
-            ) {
-        super(redisTemplate, objectMapper);
+    ) {
+        super(objectMapper);
         this.chatClient = ChatClient.builder(gptChatModel).build();
     }
 

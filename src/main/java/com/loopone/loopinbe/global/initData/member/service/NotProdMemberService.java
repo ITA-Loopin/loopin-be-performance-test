@@ -32,4 +32,20 @@ public class NotProdMemberService {
             memberEmails.add(member.getEmail());
         }
     }
+
+    // 유저 1 ~ 1000 생성
+    @Transactional
+    public void createTestMembers(List<String> memberEmails) {
+        for (int n = 1; n <= 1000; n++) {
+            String nickname = "user" + n; // user1 ... user1000
+            String email = "user" + n + "@example.com";
+            MemberCreateRequest req = MemberCreateRequest.builder()
+                    .nickname(nickname)
+                    .email(email)
+                    .build();
+            Member member = memberService.regularSignUp(req);
+            chatRoomService.createAiChatRoom(member.getId());
+            memberEmails.add(member.getEmail());
+        }
+    }
 }

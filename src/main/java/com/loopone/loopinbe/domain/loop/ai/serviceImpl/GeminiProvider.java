@@ -10,7 +10,6 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.annotation.Order;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
@@ -22,10 +21,9 @@ public class GeminiProvider extends AbstractAiProvider {
     private final ChatClient chatClient;
 
     protected GeminiProvider(
-            RedisTemplate<String, Object> redisTemplate,
             ObjectMapper objectMapper,
             @Qualifier("geminiChatModel") ChatModel geminiChatModel) {
-        super(redisTemplate, objectMapper);
+        super(objectMapper);
         this.chatClient = ChatClient.builder(geminiChatModel).build();
     }
 

@@ -10,6 +10,9 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.experimental.SuperBuilder;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Entity
 @Getter
 @Setter
@@ -29,6 +32,9 @@ public class TeamLoopChecklist extends BaseEntity {
 
     @Column(nullable = false, length = 200)
     private String content;
+
+    @OneToMany(mappedBy = "checklist", cascade = CascadeType.REMOVE, orphanRemoval = true)
+    private List<TeamLoopMemberCheck> memberChecks = new ArrayList<>();
 
     public void updateContent(String content) {
         this.content = content;

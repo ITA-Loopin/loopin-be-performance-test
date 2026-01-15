@@ -20,7 +20,7 @@ public class TeamLoopMemberCheck extends BaseEntity {
 
     // 어떤 체크리스트 항목에 대한 체크인지
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "checklist_id")
+    @JoinColumn(name = "team_loop_checklist_id")
     private TeamLoopChecklist checklist;
 
     @Column(nullable = false)
