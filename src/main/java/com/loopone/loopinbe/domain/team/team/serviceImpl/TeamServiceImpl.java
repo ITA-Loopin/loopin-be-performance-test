@@ -4,6 +4,7 @@ import com.loopone.loopinbe.domain.account.auth.currentUser.CurrentUserDto;
 import com.loopone.loopinbe.domain.account.member.entity.Member;
 import com.loopone.loopinbe.domain.account.member.repository.MemberRepository;
 import com.loopone.loopinbe.domain.chat.chatRoom.service.ChatRoomService;
+import com.loopone.loopinbe.domain.loop.loop.entity.LoopPage;
 import com.loopone.loopinbe.domain.team.team.dto.req.TeamCreateRequest;
 import com.loopone.loopinbe.domain.team.team.dto.req.TeamOrderUpdateRequest;
 import com.loopone.loopinbe.domain.team.team.dto.res.MyTeamResponse;
@@ -12,6 +13,7 @@ import com.loopone.loopinbe.domain.team.team.dto.res.TeamDetailResponse;
 import com.loopone.loopinbe.domain.team.team.dto.res.TeamMemberResponse;
 import com.loopone.loopinbe.domain.team.team.entity.Team;
 import com.loopone.loopinbe.domain.team.team.entity.TeamMember;
+import com.loopone.loopinbe.domain.team.team.entity.TeamPage;
 import com.loopone.loopinbe.domain.team.team.mapper.TeamMapper;
 import com.loopone.loopinbe.domain.team.team.repository.TeamMemberRepository;
 import com.loopone.loopinbe.domain.team.team.repository.TeamRepository;
@@ -24,10 +26,13 @@ import com.loopone.loopinbe.domain.team.teamLoop.repository.TeamLoopMemberCheckR
 import com.loopone.loopinbe.domain.team.teamLoop.repository.TeamLoopMemberProgressRepository;
 import com.loopone.loopinbe.domain.team.teamLoop.repository.TeamLoopRepository;
 import com.loopone.loopinbe.domain.team.teamLoop.service.TeamLoopService;
+import com.loopone.loopinbe.global.common.response.PageResponse;
 import com.loopone.loopinbe.global.exception.ReturnCode;
 import com.loopone.loopinbe.global.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,13 +61,13 @@ public class TeamServiceImpl implements TeamService {
     public Long createTeam(TeamCreateRequest request, CurrentUserDto currentUser) {
         Member leader = getMemberOrThrow(currentUser.id());
 
-        //팀 엔티티 생성 및 저장
+        // 팀 엔티티 생성 및 저장
         Team team = saveTeam(request, leader);
 
-        //팀장을 팀원으로 등록
+        // 팀장을 팀원으로 등록
         saveLeaderAsMember(team, leader);
 
-        //초대된 멤버들 등록
+        // 초대된 멤버들 등록
         List<Member> members = inviteMembers(team, request.invitedNicknames());
 
         chatRoomService.createTeamChatRoom(currentUser.id(), team, members);
@@ -74,52 +79,49 @@ public class TeamServiceImpl implements TeamService {
     public List<MyTeamResponse> getMyTeams(CurrentUserDto currentUser) {
         Member member = getMemberOrThrow(currentUser.id());
 
-        //내가 속한 팀들과의 연결 정보 조회 (sortOrder 우선, null이면 createdAt DESC)
+        // 내가 속한 팀들과의 연결 정보 조회 (sortOrder 우선, null이면 createdAt DESC)
         List<TeamMember> myTeamMembers = teamMemberRepository.findAllByMemberOrderBySortOrder(member);
 
-        //DTO 변환
+        // DTO 변환
         return myTeamMembers.stream()
                 .map(teamMapper::toMyTeamResponse)
                 .collect(Collectors.toList());
     }
 
     @Override
-    public List<RecruitingTeamResponse> getRecruitingTeams(CurrentUserDto currentUser) {
+    public PageResponse<RecruitingTeamResponse> getRecruitingTeams(Pageable pageable, CurrentUserDto currentUser) {
+        checkPageSize(pageable.getPageSize());
         //모든 팀 조회
-        List<Team> allTeams = teamRepository.findAll();
-
-        //내가 이미 속한 팀 ID 목록 조회
         List<Long> myTeamIds = getMyTeamIds(currentUser.id());
+        Page<Team> page = myTeamIds.isEmpty()
+                ? teamRepository.findAll(pageable)
+                : teamRepository.findByIdNotIn(myTeamIds, pageable);
 
-        //내가 속하지 않은 팀만 필터링하여 반환
-        return allTeams.stream()
-                .filter(team -> !myTeamIds.contains(team.getId()))
-                .map(teamMapper::toRecruitingTeamResponse)
-                .collect(Collectors.toList());
+        return PageResponse.of(page.map(teamMapper::toRecruitingTeamResponse)); // 또는 PageResponse.from(page.map(...))
     }
 
     @Override
     public TeamDetailResponse getTeamDetails(Long teamId, LocalDate targetDate, CurrentUserDto currentUser) {
         Team team = getTeamOrThrow(teamId);
 
-        //해당 날짜의 팀 전체 루프 조회
+        // 해당 날짜의 팀 전체 루프 조회
         List<TeamLoop> todayLoops = teamLoopRepository.findByTeamAndLoopDate(team, targetDate);
 
-        //팀 루프 통계 계산
+        // 팀 루프 통계 계산
         int totalLoopCount = todayLoops.size();
-        double teamTotalProgress = todayLoops.isEmpty() ? 0.0 :
-                todayLoops.stream()
+        double teamTotalProgress = todayLoops.isEmpty() ? 0.0
+                : todayLoops.stream()
                         .mapToDouble(TeamLoop::calculateTeamProgress)
                         .average().orElse(0.0);
 
-        //내 루프 통계 계산
+        // 내 루프 통계 계산
         Long myId = currentUser.id();
         List<TeamLoop> myTeamLoops = todayLoops.stream()
                 .filter(loop -> loop.isParticipating(myId))
                 .toList();
         int myTeamLoopCount = myTeamLoops.size();
-        double myTotalProgress = myTeamLoops.isEmpty() ? 0.0 :
-                myTeamLoops.stream()
+        double myTotalProgress = myTeamLoops.isEmpty() ? 0.0
+                : myTeamLoops.stream()
                         .mapToDouble(loop -> loop.calculatePersonalProgress(myId))
                         .average().orElse(0.0);
 
@@ -130,6 +132,8 @@ public class TeamServiceImpl implements TeamService {
                 .goal(team.getGoal())
                 .category(team.getCategory())
                 .leaderId(team.getLeader().getId())
+                .createdAt(team.getCreatedAt())
+                .visibility(team.getVisibility())
                 .totalLoopCount(totalLoopCount)
                 .teamTotalProgress(teamTotalProgress)
                 .myLoopCount(myTeamLoopCount)
@@ -150,7 +154,7 @@ public class TeamServiceImpl implements TeamService {
                 .collect(Collectors.toList());
     }
 
-    //팀 순서 변경
+    // 팀 순서 변경
     @Override
     @Transactional
     public void updateTeamOrder(TeamOrderUpdateRequest request, CurrentUserDto currentUser) {
@@ -211,7 +215,8 @@ public class TeamServiceImpl implements TeamService {
         allRelatedTeamIds.addAll(myTeamIds);
         allRelatedTeamIds.addAll(leaderTeamIds);
         allRelatedTeamIds = allRelatedTeamIds.stream().distinct().toList();
-        if (allRelatedTeamIds.isEmpty()) return;
+        if (allRelatedTeamIds.isEmpty())
+            return;
         // 4) 리더 팀 처리: 위임 or 팀 삭제
         List<Long> teamsToDelete = new ArrayList<>();
         for (Team team : myLeaderTeams) {
@@ -224,8 +229,7 @@ public class TeamServiceImpl implements TeamService {
                                 teamRepository.save(team); // 명시적으로 저장
                                 teamLoopService.transferTeamLoopRuleOwner(team.getId(), memberId, nextLeader);
                             },
-                            () -> teamsToDelete.add(team.getId())
-                    );
+                            () -> teamsToDelete.add(team.getId()));
         }
         // 5) 팀은 남고 나는 나가기만 하는 팀들
         List<Long> remainingTeamIds = allRelatedTeamIds.stream()
@@ -319,10 +323,18 @@ public class TeamServiceImpl implements TeamService {
                 .toList();
     }
 
-    //팀 조회
+    // 팀 조회
     private Team getTeamOrThrow(Long teamId) {
         return teamRepository.findById(teamId)
                 .orElseThrow(() -> new ServiceException(ReturnCode.TEAM_NOT_FOUND));
+    }
+
+    // 요청 페이지 수 제한
+    private void checkPageSize(int pageSize) {
+        int maxPageSize = TeamPage.getMaxPageSize();
+        if (pageSize > maxPageSize) {
+            throw new ServiceException(ReturnCode.PAGE_REQUEST_FAIL);
+        }
     }
 
     // ========== 검증 메서드 ==========

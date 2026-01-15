@@ -12,14 +12,18 @@ import com.loopone.loopinbe.domain.team.team.repository.TeamMemberRepository;
 import com.loopone.loopinbe.domain.team.team.repository.TeamRepository;
 import com.loopone.loopinbe.domain.team.teamLoop.dto.req.TeamLoopCreateRequest;
 import com.loopone.loopinbe.domain.team.teamLoop.dto.res.TeamLoopAllDetailResponse;
+import com.loopone.loopinbe.domain.team.teamLoop.dto.res.TeamLoopCalendarResponse;
 import com.loopone.loopinbe.domain.team.teamLoop.dto.res.TeamLoopMyDetailResponse;
 import com.loopone.loopinbe.domain.team.teamLoop.dto.res.TeamLoopListResponse;
+import com.loopone.loopinbe.domain.team.teamLoop.dto.res.MemberActivitiesResponse;
 import com.loopone.loopinbe.domain.team.teamLoop.entity.TeamLoop;
+import com.loopone.loopinbe.domain.team.teamLoop.entity.TeamLoopActivity;
 import com.loopone.loopinbe.domain.team.teamLoop.entity.TeamLoopChecklist;
 import com.loopone.loopinbe.domain.team.teamLoop.entity.TeamLoopMemberCheck;
 import com.loopone.loopinbe.domain.team.teamLoop.entity.TeamLoopMemberProgress;
 import com.loopone.loopinbe.domain.team.teamLoop.enums.TeamLoopStatus;
 import com.loopone.loopinbe.domain.team.teamLoop.enums.TeamLoopType;
+import com.loopone.loopinbe.domain.team.teamLoop.repository.TeamLoopActivityRepository;
 import com.loopone.loopinbe.domain.team.teamLoop.repository.TeamLoopChecklistRepository;
 import com.loopone.loopinbe.domain.team.teamLoop.repository.TeamLoopMemberCheckRepository;
 import com.loopone.loopinbe.domain.team.teamLoop.repository.TeamLoopMemberProgressRepository;
@@ -30,14 +34,13 @@ import com.loopone.loopinbe.global.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Set;
+import java.time.YearMonth;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -53,26 +56,32 @@ public class TeamLoopServiceImpl implements TeamLoopService {
     private final TeamLoopMemberProgressRepository teamLoopMemberProgressRepository;
     private final TeamLoopMemberCheckRepository teamLoopMemberCheckRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final TeamLoopActivityRepository teamLoopActivityRepository;
 
-    //팀 루프 리스트 조회
+    // 팀 루프 리스트 조회
     @Override
-    public List<TeamLoopListResponse> getTeamLoops(Long teamId, LocalDate targetDate, CurrentUserDto currentUser) {
+    public List<TeamLoopListResponse> getTeamLoops(Long teamId, LocalDate targetDate, TeamLoopStatus statusFilter,
+            CurrentUserDto currentUser) {
         List<TeamLoop> teamLoops = teamLoopRepository.findAllByTeamIdAndDate(teamId, targetDate);
         Long myId = currentUser.id();
 
         return teamLoops.stream()
                 .map(loop -> {
-                    //참여 여부
+                    // 참여 여부
                     boolean isParticipating = loop.isParticipating(myId);
-                    //해당 루프의 내 진행률
-                    double myProgress = isParticipating ?
-                            loop.calculatePersonalProgress(myId) : 0.0;
-                    //해당 루프의 팀 진행률
+                    // 해당 루프의 내 진행률
+                    double myProgress = isParticipating ? loop.calculatePersonalProgress(myId) : 0.0;
+                    // 해당 루프의 팀 진행률
                     double teamProgress = loop.calculateTeamProgress();
-                    //반복 주기 문자열
+                    // 반복 주기 문자열
                     String repeatCycle = formatRepeatCycle(loop.getLoopRule());
-                    //나의 루프 상태
-                    TeamLoopStatus status = loop.calculatePersonalStatus(myId);
+                    // 나의 루프 상태
+                    TeamLoopStatus myStatus = loop.calculatePersonalStatus(myId);
+
+                    // 상태 필터링 (statusFilter가 null이 아닐 때만)
+                    if (statusFilter != null && myStatus != statusFilter) {
+                        return null; // 필터링 대상
+                    }
 
                     return TeamLoopListResponse.builder()
                             .id(loop.getId())
@@ -84,13 +93,14 @@ public class TeamLoopServiceImpl implements TeamLoopService {
                             .personalProgress(myProgress)
                             .isParticipating(isParticipating)
                             .repeatCycle(repeatCycle)
-                            .status(status)
+                            .status(myStatus)
                             .build();
                 })
+                .filter(Objects::nonNull) // null 제거 (필터링된 항목)
                 .collect(Collectors.toList());
     }
 
-    //팀 루프 생성
+    // 팀 루프 생성
     @Override
     @Transactional
     public Long createTeamLoop(Long teamId, TeamLoopCreateRequest requestDTO, CurrentUserDto currentUser) {
@@ -241,6 +251,46 @@ public class TeamLoopServiceImpl implements TeamLoopService {
                 .build();
     }
 
+    // 팀 루프 캘린더 조회
+    @Override
+    @Transactional(readOnly = true)
+    public TeamLoopCalendarResponse getTeamLoopCalendar(Long teamId, int year, int month, CurrentUserDto currentUser) {
+        // 팀 조회 및 권한 검증
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new ServiceException(ReturnCode.TEAM_NOT_FOUND));
+
+        // 팀원 여부 검증
+        boolean isMember = team.getTeamMembers().stream()
+                .anyMatch(tm -> tm.getMember().getId().equals(currentUser.id()));
+        if (!isMember) {
+            throw new ServiceException(ReturnCode.NOT_AUTHORIZED);
+        }
+
+        YearMonth targetYearMonth = YearMonth.of(year, month);
+        // 조회 범위 계산
+        LocalDate startDate = targetYearMonth.atDay(1).minusDays(7); // 전월 마지막 주 포함
+        LocalDate endDate = targetYearMonth.atEndOfMonth().plusDays(7); // 익월 첫 주 포함
+
+        // 해당 기간 내 팀 루프가 존재하는 날짜들만 조회
+        List<LocalDate> existingTeamLoopDates = teamLoopRepository.findTeamLoopDatesByTeamIdAndDateRange(
+                teamId, startDate, endDate);
+
+        // 빠른 조회를 위해 Set으로 변환
+        Set<LocalDate> hasTeamLoopDateSet = new HashSet<>(existingTeamLoopDates);
+
+        // 시작일부터 종료일까지 하루씩 순회하며 결과 리스트 생성
+        List<TeamLoopCalendarResponse.CalendarDay> calendarDays = new ArrayList<>();
+        startDate.datesUntil(endDate.plusDays(1)).forEach(currentDate -> {
+            boolean hasTeamLoop = hasTeamLoopDateSet.contains(currentDate);
+            calendarDays.add(new TeamLoopCalendarResponse.CalendarDay(currentDate, hasTeamLoop));
+        });
+
+        return TeamLoopCalendarResponse.builder()
+                .teamName(team.getName())
+                .days(calendarDays)
+                .build();
+    }
+
     // (A) teamsToDelete: 팀 자체가 삭제될 팀들 -> 팀에 속한 루프/체크/진행률/체크리스트 "전체 삭제"
     // (B) remainingTeamIds: 팀은 남고 내가 탈퇴하는 팀들 -> 내 체크/내 진행률만 삭제
     @Override
@@ -274,6 +324,49 @@ public class TeamLoopServiceImpl implements TeamLoopService {
         loopRuleRepository.transferOwnerByTeamId(teamId, oldLeaderId, newLeader);
     }
 
+    // 팀원 활동 조회
+    @Override
+    public MemberActivitiesResponse getMemberActivities(Long teamId, LocalDate targetDate, CurrentUserDto currentUser) {
+        // 팀원 검증
+        validateTeamMember(teamId, currentUser.id());
+
+        // 팀 조회
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> new ServiceException(ReturnCode.TEAM_NOT_FOUND));
+
+        // 특정 날짜의 팀 루프만 조회
+        List<TeamLoop> teamLoops = teamLoopRepository.findAllByTeamIdAndDate(teamId, targetDate);
+
+        // 팀원 목록
+        List<Member> teamMembers = team.getTeamMembers().stream()
+                .map(TeamMember::getMember)
+                .toList();
+
+        // 팀원별 활동 정보 생성
+        List<MemberActivitiesResponse.MemberActivity> memberActivities = teamMembers.stream()
+                .map(member -> calculateMemberActivity(member, teamLoops, currentUser.id()))
+                .toList();
+
+        // 팀 전체 최근 활동 로그 조회 (최대 10개)
+        List<TeamLoopActivity> recentActivities = teamLoopActivityRepository
+                .findRecentActivitiesByTeamId(teamId, PageRequest.of(0, 10));
+
+        List<MemberActivitiesResponse.TeamActivityLog> teamActivityLogs = recentActivities.stream()
+                .map(activity -> MemberActivitiesResponse.TeamActivityLog.builder()
+                        .memberId(activity.getMember().getId())
+                        .nickname(activity.getMember().getNickname())
+                        .actionType(activity.getActionType())
+                        .targetName(activity.getTargetName())
+                        .timestamp(activity.getCreatedAt())
+                        .build())
+                .toList();
+
+        return MemberActivitiesResponse.builder()
+                .memberActivities(memberActivities)
+                .recentTeamActivities(teamActivityLogs)
+                .build();
+    }
+
     // ========== 비즈니스 로직 메서드 ==========
     private Long createSingleTeamLoop(Team team, TeamLoopCreateRequest requestDTO) {
         LocalDate date = (requestDTO.specificDate() == null) ? LocalDate.now() : requestDTO.specificDate();
@@ -292,9 +385,8 @@ public class TeamLoopServiceImpl implements TeamLoopService {
         List<TeamLoop> loopsToCreate = new ArrayList<>();
 
         // LoopServiceImpl과 동일한 날짜 순회 로직
-        for (LocalDate currentDate = loopRule.getStartDate();
-             !currentDate.isAfter(loopRule.getEndDate());
-             currentDate = currentDate.plusDays(1)) {
+        for (LocalDate currentDate = loopRule.getStartDate(); !currentDate
+                .isAfter(loopRule.getEndDate()); currentDate = currentDate.plusDays(1)) {
 
             if (loopRule.getDaysOfWeek().contains(currentDate.getDayOfWeek())) {
                 loopsToCreate.add(buildTeamLoop(team, requestDTO, currentDate, loopRule));
@@ -460,28 +552,28 @@ public class TeamLoopServiceImpl implements TeamLoopService {
 
     // 참여자 목록 필터링
     private List<Member> getParticipants(Team team, TeamLoopCreateRequest requestDTO) {
-        //팀원들의 객체 리스트
+        // 팀원들의 객체 리스트
         List<Member> TeamMembers = team.getTeamMembers().stream()
                 .map(TeamMember::getMember)
                 .collect(Collectors.toList());
 
         if (requestDTO.type() == TeamLoopType.COMMON) {
-            //공통인 경우 팀원 전체 반환
+            // 공통인 경우 팀원 전체 반환
             return TeamMembers;
         } else {
-            //개인인 경우 해당하는 팀원만 반환
+            // 개인인 경우 해당하는 팀원만 반환
             List<Long> targetIds = requestDTO.targetMemberIds();
 
             if (targetIds == null || targetIds.isEmpty()) {
                 throw new ServiceException(ReturnCode.INVALID_REQUEST_TEAM);
             }
 
-            //실제 팀 맴버의 ID
+            // 실제 팀 맴버의 ID
             List<Long> actualMemberIds = TeamMembers.stream()
                     .map(Member::getId)
                     .toList();
 
-            //요청 ID 중 팀원이 아닌 ID가 있는지 검사
+            // 요청 ID 중 팀원이 아닌 ID가 있는지 검사
             boolean allMatch = actualMemberIds.containsAll(targetIds);
             if (!allMatch) {
                 throw new ServiceException(ReturnCode.USER_NOT_IN_TEAM);
@@ -491,6 +583,55 @@ public class TeamLoopServiceImpl implements TeamLoopService {
                     .filter(m -> targetIds.contains(m.getId()))
                     .collect(Collectors.toList());
         }
+    }
+
+    // 개별 팀원의 활동 정보 계산
+    private MemberActivitiesResponse.MemberActivity calculateMemberActivity(Member member, List<TeamLoop> allTeamLoops,
+            Long currentUserId) {
+        Long memberId = member.getId();
+        // 해당 멤버가 참여하는 팀 루프만 필터링
+        List<TeamLoop> participatingLoops = allTeamLoops.stream()
+                .filter(loop -> loop.isParticipating(memberId))
+                .toList();
+        // 상태별 개수
+        Map<TeamLoopStatus, Long> statusCounts = participatingLoops.stream()
+                .collect(Collectors.groupingBy(
+                        loop -> loop.calculatePersonalStatus(memberId),
+                        Collectors.counting()));
+        Map<TeamLoopStatus, Integer> statusStats = Map.of(
+                TeamLoopStatus.NOT_STARTED, statusCounts.getOrDefault(TeamLoopStatus.NOT_STARTED, 0L).intValue(),
+                TeamLoopStatus.IN_PROGRESS, statusCounts.getOrDefault(TeamLoopStatus.IN_PROGRESS, 0L).intValue(),
+                TeamLoopStatus.COMPLETED, statusCounts.getOrDefault(TeamLoopStatus.COMPLETED, 0L).intValue());
+        // 유형별 개수
+        Map<TeamLoopType, Long> typeCounts = participatingLoops.stream()
+                .collect(Collectors.groupingBy(TeamLoop::getType, Collectors.counting()));
+        Map<TeamLoopType, Integer> typeStats = Map.of(
+                TeamLoopType.COMMON, typeCounts.getOrDefault(TeamLoopType.COMMON, 0L).intValue(),
+                TeamLoopType.INDIVIDUAL, typeCounts.getOrDefault(TeamLoopType.INDIVIDUAL, 0L).intValue());
+        // 전체 진행률 평균
+        double overallProgress = participatingLoops.isEmpty() ? 0.0
+                : participatingLoops.stream()
+                        .mapToDouble(loop -> loop.calculatePersonalProgress(memberId))
+                        .average()
+                        .orElse(0.0);
+        // 최근 활동 조회
+        MemberActivitiesResponse.MemberActivity.LastActivity lastActivity = teamLoopActivityRepository
+                .findFirstByMemberIdOrderByCreatedAtDesc(memberId)
+                .map(activity -> MemberActivitiesResponse.MemberActivity.LastActivity.builder()
+                        .actionType(activity.getActionType())
+                        .targetName(activity.getTargetName())
+                        .timestamp(activity.getCreatedAt())
+                        .build())
+                .orElse(null);
+        return MemberActivitiesResponse.MemberActivity.builder()
+                .memberId(memberId)
+                .nickname(member.getNickname())
+                .isMe(memberId.equals(currentUserId))
+                .statusStats(statusStats)
+                .typeStats(typeStats)
+                .overallProgress(overallProgress)
+                .lastActivity(lastActivity)
+                .build();
     }
 
     // ========== 검증 메서드 ==========
@@ -504,7 +645,8 @@ public class TeamLoopServiceImpl implements TeamLoopService {
     // ========== 헬퍼 메서드 ==========
     // List -> Set 변환
     private Set<DayOfWeek> toDayOfWeekSet(List<DayOfWeek> days) {
-        if (days == null || days.isEmpty()) return null; // WEEKLY 아니면 null 저장하려는 의도 유지
+        if (days == null || days.isEmpty())
+            return null; // WEEKLY 아니면 null 저장하려는 의도 유지
         return EnumSet.copyOf(days); // 중복 제거 + Enum 최적화 Set
     }
 

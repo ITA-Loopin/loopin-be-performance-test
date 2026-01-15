@@ -174,7 +174,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                         sendWsError(session, "BAD_REQUEST", "messageId is required");
                         return;
                     }
-                    String messageId = String.valueOf(in.getDeleteId());
+                    String messageId = in.getDeleteId();
                     try {
                         chatMessageService.deleteChatMessage(messageId, memberId);
                         ChatWebSocketPayload out = ChatWebSocketPayload.builder()

@@ -6,5 +6,6 @@ public enum MessageType {
     CREATE_LOOP,
     UPDATE_LOOP,
     READ_UP_TO,
+    GET_LOOP,
     DELETE
 }

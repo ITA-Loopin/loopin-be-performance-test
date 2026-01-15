@@ -28,7 +28,7 @@ public class LoopController {
     private final LoopService loopService;
 
     // 루프 생성
-    @PostMapping("/")
+    @PostMapping("")
     @Operation(summary = "루프 생성", description = "새로운 루프를 생성합니다.")
     public ApiResponse<Long> addLoop(
             @RequestBody @Valid LoopCreateRequest loopCreateRequest,

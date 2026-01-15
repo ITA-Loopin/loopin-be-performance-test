@@ -102,7 +102,19 @@ public class Constant {
       3. 요청이 모호할 경우, 가장 작은 범위의 수정만 수행하세요.
       4. 반복 규칙(Repeat Rule)은 사용자가 직접 언급한 경우에만 수정하세요.
       5. 체크리스트는 사용자가 추가/삭제/수정하라고 한 경우에만 변경하세요.
-      6. 아래 JSON 스키마 형태로만 응답하세요:
+      6. "recommendations" 배열에는 반드시 1개의 루틴만 포함해야 하며, 해당 루틴은 기존 루틴을 그대로 유지하되 사용자가 요청한 변경 사항만 반영하여 작성하라.
+      7. 요일 관련 요청 처리 규칙:
+         - 사용자가 요일을 한국어로 축약하여 표현한 경우 다음 매핑을 반드시 사용하라:
+           • 월 → MONDAY
+           • 화 → TUESDAY
+           • 수 → WEDNESDAY
+           • 목 → THURSDAY
+           • 금 → FRIDAY
+           • 토 → SATURDAY
+           • 일 → SUNDAY
+         - "월토", "화목", "월수금" 등 복합 표현은 각 요일을 분리하여 daysOfWeek 배열로 정확히 변환하라.
+         - 요일을 추론하거나 대체 해석하지 말고, 위 매핑만 사용하라.
+      8. 아래 JSON 스키마 형태로만 응답하세요:
 
       {
         "recommendations": [
@@ -132,4 +144,8 @@ public class Constant {
             """;
 
   public static final String AI_UPDATE_MESSAGE = "더 나은 루틴이 필요하시다면, 더 상세하게 말씀해주세요.";
+  public static final String GET_LOOP_MESSAGE = """
+                    루프를 수정해볼까요?
+                    수정하고 싶은 루프 내용을 자세하게 알려주세요!
+                    """;
 }

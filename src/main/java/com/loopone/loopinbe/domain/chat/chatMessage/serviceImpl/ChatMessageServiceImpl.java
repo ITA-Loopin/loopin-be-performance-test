@@ -4,9 +4,9 @@ import com.loopone.loopinbe.domain.account.auth.currentUser.CurrentUserDto;
 import com.loopone.loopinbe.domain.account.member.entity.Member;
 import com.loopone.loopinbe.domain.chat.chatMessage.converter.ChatMessageConverter;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
-import com.loopone.loopinbe.domain.chat.chatMessage.dto.res.ChatMessageResponse;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatMessagePayload;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.req.ChatMessageRequest;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.res.ChatMessageResponse;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessage;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessagePage;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.type.MessageType;
@@ -16,6 +16,7 @@ import com.loopone.loopinbe.domain.chat.chatMessage.validator.AttachmentValidato
 import com.loopone.loopinbe.domain.chat.chatRoom.entity.ChatRoom;
 import com.loopone.loopinbe.domain.chat.chatRoom.repository.ChatRoomRepository;
 import com.loopone.loopinbe.domain.loop.ai.dto.AiPayload;
+import com.loopone.loopinbe.domain.loop.loop.dto.req.LoopCreateRequest;
 import com.loopone.loopinbe.domain.loop.loop.dto.res.LoopDetailResponse;
 import com.loopone.loopinbe.domain.loop.loop.entity.Loop;
 import com.loopone.loopinbe.domain.loop.loop.mapper.LoopMapper;
@@ -30,7 +31,10 @@ import com.loopone.loopinbe.global.webSocket.payload.ChatWebSocketPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.Hibernate;
-import org.springframework.data.domain.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -39,6 +43,7 @@ import java.io.IOException;
 import java.util.*;
 
 import static com.loopone.loopinbe.domain.chat.chatMessage.entity.type.MessageType.*;
+import static com.loopone.loopinbe.global.constants.Constant.GET_LOOP_MESSAGE;
 import static com.loopone.loopinbe.global.constants.KafkaKey.OPEN_AI_CREATE_TOPIC;
 import static com.loopone.loopinbe.global.constants.KafkaKey.OPEN_AI_UPDATE_TOPIC;
 
@@ -178,7 +183,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         boolean memberExists = chatRoomRepository.existsMember(chatRoomId, currentUser.id());
         if (!memberExists) throw new ServiceException(ReturnCode.NOT_AUTHORIZED);
 
-        if (request.messageType() != CREATE_LOOP && request.messageType() != UPDATE_LOOP) {
+        if (request.messageType() != CREATE_LOOP && request.messageType() != UPDATE_LOOP && request.messageType() != GET_LOOP) {
             throw new ServiceException(ReturnCode.CHATMESSAGE_INVALID_TYPE);
         }
 
@@ -190,7 +195,24 @@ public class ChatMessageServiceImpl implements ChatMessageService {
             Hibernate.initialize(loop.getLoopRule().getDaysOfWeek());
         }
 
-        ChatMessagePayload payload = toChatMessagePayload(request.clientMessageId(), chatRoomId, currentUser.id(), request.content(), null);
+        LoopDetailResponse loopDetailResponse = (loop != null) ? loopMapper.toDetailResponse(loop) : null;
+
+        // 기본값: 유저 메시지 설정
+        UUID msgId = request.clientMessageId();
+        String msgContent = request.content();
+        ChatMessage.AuthorType msgAuthor = ChatMessage.AuthorType.USER;
+        List<LoopCreateRequest> msgRecommendations = null;
+
+        if (request.messageType() == GET_LOOP) {
+            msgId = UUID.randomUUID();
+            msgContent = GET_LOOP_MESSAGE;
+            msgAuthor = ChatMessage.AuthorType.BOT;
+            if (loopDetailResponse != null) {
+                msgRecommendations = Collections.singletonList(convertToCreateRequest(loopDetailResponse, chatRoomId));
+            }
+        }
+
+        ChatMessagePayload payload = toChatMessagePayload(msgId, chatRoomId, currentUser.id(), msgContent, null, msgRecommendations, msgAuthor);
         ChatMessagePayload saved = processInbound(payload);
 
         // ChatMessagePayload -> ChatMessageResponse
@@ -199,11 +221,9 @@ public class ChatMessageServiceImpl implements ChatMessageService {
 
         sseEmitterService.sendToClient(chatRoomId, MESSAGE, response);
 
-
         if (request.messageType() == CREATE_LOOP) {
             publishAI(saved, null, OPEN_AI_CREATE_TOPIC);
-        } else {
-            LoopDetailResponse loopDetailResponse = (loop != null) ? loopMapper.toDetailResponse(loop) : null;
+        } else if (request.messageType() == UPDATE_LOOP) {
             publishAI(saved, loopDetailResponse, OPEN_AI_UPDATE_TOPIC);
         }
     }
@@ -219,7 +239,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         AttachmentValidator.validateImages(images);
         AttachmentValidator.validateFiles(files);
         boolean hasAny = (images != null && images.stream().anyMatch(f -> f != null && !f.isEmpty()))
-                        || (files != null && files.stream().anyMatch(f -> f != null && !f.isEmpty()));
+                || (files != null && files.stream().anyMatch(f -> f != null && !f.isEmpty()));
         if (!hasAny) throw new ServiceException(ReturnCode.FILE_UPLOAD_ERROR);
         // 3) S3 업로드
         List<ChatAttachment> uploaded = new ArrayList<>();
@@ -245,7 +265,9 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                     chatRoomId,
                     currentUser.id(),
                     null,
-                    uploaded
+                    uploaded,
+                    null,
+                    ChatMessage.AuthorType.USER
             );
             ChatMessagePayload saved = processInbound(payload);
             // 5) Response 변환
@@ -264,6 +286,28 @@ public class ChatMessageServiceImpl implements ChatMessageService {
 
     // ----------------- 헬퍼 메서드 -----------------
 
+    private LoopCreateRequest convertToCreateRequest(LoopDetailResponse detail, Long chatRoomId) {
+        // LoopDetailResponse -> LoopCreateRequest 변환
+        // 주의: ID나 진행률 정보는 유실됨
+        List<String> checklists = (detail.checklists() != null)
+                ? detail.checklists().stream().map(com.loopone.loopinbe.domain.loop.loopChecklist.dto.res.LoopChecklistResponse::content).toList()
+                : Collections.emptyList();
+
+        var rule = detail.loopRule();
+
+        return new LoopCreateRequest(
+                detail.title(),
+                detail.content(),
+                (rule != null) ? rule.scheduleType() : com.loopone.loopinbe.domain.loop.loop.enums.RepeatType.NONE,
+                (rule == null) ? detail.loopDate() : null, // 규칙 없으면 단일 날짜 사용
+                (rule != null) ? rule.daysOfWeek() : null,
+                (rule != null) ? rule.startDate() : null,
+                (rule != null) ? rule.endDate() : null,
+                checklists,
+                chatRoomId
+        );
+    }
+
     // 요청 페이지 수 제한
     private void checkPageSize(int pageSize) {
         int maxPageSize = ChatMessagePage.getMaxPageSize();
@@ -272,7 +316,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         }
     }
 
-    private ChatMessagePayload toChatMessagePayload(UUID clientMessageId, Long chatRoomId, Long userId, String content, List<ChatAttachment> attachments) {
+    private ChatMessagePayload toChatMessagePayload(UUID clientMessageId, Long chatRoomId, Long userId, String content, List<ChatAttachment> attachments, List<LoopCreateRequest> recommendations, ChatMessage.AuthorType authorType) {
         String id = "u:" + clientMessageId;
         return new ChatMessagePayload(
                 id,
@@ -281,9 +325,9 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 userId,
                 content,
                 attachments,
+                recommendations,
                 null,
-                null,
-                ChatMessage.AuthorType.USER,
+                authorType,
                 true,
                 java.time.Instant.now(),
                 java.time.Instant.now());

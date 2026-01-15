@@ -1,6 +1,5 @@
 package com.loopone.loopinbe.domain.team.team.service;
 
-
 import com.loopone.loopinbe.domain.account.auth.currentUser.CurrentUserDto;
 import com.loopone.loopinbe.domain.account.member.entity.Member;
 import com.loopone.loopinbe.domain.team.team.dto.req.TeamCreateRequest;
@@ -9,6 +8,8 @@ import com.loopone.loopinbe.domain.team.team.dto.res.MyTeamResponse;
 import com.loopone.loopinbe.domain.team.team.dto.res.RecruitingTeamResponse;
 import com.loopone.loopinbe.domain.team.team.dto.res.TeamDetailResponse;
 import com.loopone.loopinbe.domain.team.team.dto.res.TeamMemberResponse;
+import com.loopone.loopinbe.global.common.response.PageResponse;
+import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -16,7 +17,7 @@ import java.util.List;
 public interface TeamService {
     Long createTeam(TeamCreateRequest request, CurrentUserDto currentUser);
     List<MyTeamResponse> getMyTeams(CurrentUserDto currentUser);
-    List<RecruitingTeamResponse> getRecruitingTeams(CurrentUserDto currentUser);
+    PageResponse<RecruitingTeamResponse> getRecruitingTeams(Pageable pageable, CurrentUserDto currentUser);
     TeamDetailResponse getTeamDetails(Long teamId, LocalDate targetDate, CurrentUserDto currentUser);
     List<TeamMemberResponse> getTeamMembers(Long teamId);
     //팀 순서 변경
