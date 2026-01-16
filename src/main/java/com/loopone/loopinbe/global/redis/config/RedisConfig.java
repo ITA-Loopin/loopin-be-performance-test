@@ -3,10 +3,12 @@ package com.loopone.loopinbe.global.redis.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
@@ -38,6 +40,7 @@ public class RedisConfig {
     }
 
     // 전역(웹/도메인)용 ObjectMapper
+    @Primary
     @Bean
     public ObjectMapper objectMapper() {
         ObjectMapper objectMapper = new ObjectMapper();
@@ -47,22 +50,24 @@ public class RedisConfig {
     }
 
     // 캐시 전용 ObjectMapper (타입 정보 활성화)
-    private ObjectMapper redisObjectMapper() {
+    @Bean(name = "redisObjectMapper")
+    public ObjectMapper redisObjectMapper() {
         ObjectMapper om = new ObjectMapper();
         om.registerModule(new JavaTimeModule());
         om.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        // Jackson 2.10+ 안전한 기본 타이핑 활성화
         om.activateDefaultTyping(
                 com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator.instance,
-                ObjectMapper.DefaultTyping.NON_FINAL
+                ObjectMapper.DefaultTyping.NON_FINAL,
+                com.fasterxml.jackson.annotation.JsonTypeInfo.As.PROPERTY
         );
         return om;
     }
 
     @Bean
-    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory,
+                                          @Qualifier("redisObjectMapper") ObjectMapper redisOm) {
         GenericJackson2JsonRedisSerializer serializer =
-                new GenericJackson2JsonRedisSerializer(redisObjectMapper());
+                new GenericJackson2JsonRedisSerializer(redisOm);
 
         // 기본 캐시 설정: TTL 10분
         RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
@@ -78,9 +83,10 @@ public class RedisConfig {
 
     // Object 전용 RedisTemplate
     @Bean
-    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
+    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory,
+                                                       @Qualifier("redisObjectMapper") ObjectMapper redisOm) {
         GenericJackson2JsonRedisSerializer serializer =
-                new GenericJackson2JsonRedisSerializer(redisObjectMapper());
+                new GenericJackson2JsonRedisSerializer(redisOm);
 
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
