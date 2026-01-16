@@ -71,15 +71,15 @@ public class AuthServiceImpl implements AuthService {
         String accessToken = jwtTokenProvider.generateToken(member.getEmail(), "ACCESS",accessTokenExpiration);
         String refreshToken = jwtTokenProvider.generateToken(member.getEmail(), "REFRESH",refreshTokenExpiration);
         // Refresh Token을 Redis에 저장
-        refreshTokenService.saveRefreshToken(member.getId().toString(), refreshToken, refreshTokenExpiration);
+        refreshTokenService.saveRefreshToken(member.getEmail(), refreshToken, refreshTokenExpiration);
         return new LoginResponse(accessToken, refreshToken);
     }
 
     // 로그아웃
     @Override
-    public void logout(Long currentUserId, String accessToken) {
+    public void logout(CurrentUserDto currentUser, String accessToken) {
         // Redis에서 Refresh Token 삭제
-        refreshTokenService.deleteRefreshToken(currentUserId.toString());
+        refreshTokenService.deleteRefreshToken(currentUser.email());
         // access 즉시 차단(deny-list)
         if (accessToken != null && jwtTokenProvider.validateAccessToken(accessToken)) {
             String jti = jwtTokenProvider.getJti(accessToken);
@@ -89,25 +89,31 @@ public class AuthServiceImpl implements AuthService {
             }
         }
         // WS 모두 종료 (4401: Unauthorized/Logged out)
-        wsSessionRegistry.closeAll(currentUserId, new CloseStatus(4401, "Logged out"));
-        log.info("Logout: memberId={}, closedWsSessions={}", currentUserId, wsSessionRegistry.count(currentUserId));
+        wsSessionRegistry.closeAll(currentUser.id(), new CloseStatus(4401, "Logged out"));
     }
 
     // accessToken 재발급
     @Override
-    public LoginResponse refreshToken(String refreshToken, CurrentUserDto currentUser) {
-        // "Bearer "가 붙어있다면 제거
+    public LoginResponse refreshToken(String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new RuntimeException("리프레시 토큰이 없습니다.");
+        }
         if (refreshToken.startsWith("Bearer ")) {
             refreshToken = refreshToken.substring(7);
         }
-        String storedRefreshToken = refreshTokenService.getRefreshToken(currentUser.id().toString());
+        // 1) 서명/만료 검증 (여기서 만료면 바로 컷)
+        if (!jwtTokenProvider.validateRefreshToken(refreshToken)) {
+            throw new RuntimeException("리프레시 토큰이 만료되었거나 유효하지 않습니다.");
+        }
+        // 2) refreshToken에서 사용자 식별자 추출
+        String email = jwtTokenProvider.getEmailFromToken(refreshToken);
+        String storedRefreshToken = refreshTokenService.getRefreshToken(email);
         if (storedRefreshToken == null || !storedRefreshToken.equals(refreshToken)) {
             throw new RuntimeException("유효하지 않은 리프레시 토큰입니다.");
         }
         if (!jwtTokenProvider.validateRefreshToken(storedRefreshToken)) {
             throw new RuntimeException("리프레시 토큰이 만료되었습니다.");
         }
-        String email = jwtTokenProvider.getEmailFromToken(storedRefreshToken);
         String newAccessToken = jwtTokenProvider.generateToken(email, "ACCESS", accessTokenExpiration);
         return new LoginResponse(newAccessToken, storedRefreshToken);
     }

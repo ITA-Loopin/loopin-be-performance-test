@@ -16,6 +16,7 @@ public class ChatRoomResponse {
     private Long ownerId;
     private String title;
     private boolean loopSelect;
+    private boolean isCallUpdateLoop;
     private Instant lastMessageAt;
     private Instant lastReadAt;
 }

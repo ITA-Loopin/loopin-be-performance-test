@@ -5,6 +5,7 @@ import com.loopone.loopinbe.domain.account.member.entity.Member;
 import com.loopone.loopinbe.domain.chat.chatMessage.converter.ChatMessageConverter;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatAttachment;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.ChatMessagePayload;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.MessageContext;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.req.ChatMessageRequest;
 import com.loopone.loopinbe.domain.chat.chatMessage.dto.res.ChatMessageResponse;
 import com.loopone.loopinbe.domain.chat.chatMessage.entity.ChatMessage;
@@ -15,6 +16,7 @@ import com.loopone.loopinbe.domain.chat.chatMessage.service.ChatMessageService;
 import com.loopone.loopinbe.domain.chat.chatMessage.validator.AttachmentValidator;
 import com.loopone.loopinbe.domain.chat.chatRoom.entity.ChatRoom;
 import com.loopone.loopinbe.domain.chat.chatRoom.repository.ChatRoomRepository;
+import com.loopone.loopinbe.domain.chat.chatRoom.service.ChatRoomStateService;
 import com.loopone.loopinbe.domain.loop.ai.dto.AiPayload;
 import com.loopone.loopinbe.domain.loop.loop.dto.req.LoopCreateRequest;
 import com.loopone.loopinbe.domain.loop.loop.dto.res.LoopDetailResponse;
@@ -43,7 +45,7 @@ import java.io.IOException;
 import java.util.*;
 
 import static com.loopone.loopinbe.domain.chat.chatMessage.entity.type.MessageType.*;
-import static com.loopone.loopinbe.global.constants.Constant.GET_LOOP_MESSAGE;
+import static com.loopone.loopinbe.global.constants.Constant.*;
 import static com.loopone.loopinbe.global.constants.KafkaKey.OPEN_AI_CREATE_TOPIC;
 import static com.loopone.loopinbe.global.constants.KafkaKey.OPEN_AI_UPDATE_TOPIC;
 
@@ -59,6 +61,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
     private final SseEmitterService sseEmitterService;
     private final S3Service s3Service;
     private final ChatMessageEventPublisher chatMessageEventPublisher;
+    private final ChatRoomStateService chatRoomStateService;
 
     // 채팅방 과거 메시지 조회 [참여자 권한]
     @Override
@@ -133,6 +136,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 in.attachments(),
                 in.recommendations(),
                 in.loopRuleId(),
+                in.deleteMessageId(),
                 in.authorType(),
                 in.createdAt(),
                 in.modifiedAt()
@@ -148,6 +152,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 saved.getAttachments(),
                 saved.getRecommendations(),
                 saved.getLoopRuleId(),
+                saved.getDeleteMessageId(),
                 saved.getAuthorType(),
                 isBotRoom,
                 saved.getCreatedAt(),
@@ -179,53 +184,50 @@ public class ChatMessageServiceImpl implements ChatMessageService {
     @Override
     @Transactional
     public void sendChatMessage(Long chatRoomId, ChatMessageRequest request, CurrentUserDto currentUser) {
-        // 참여자 검증
-        boolean memberExists = chatRoomRepository.existsMember(chatRoomId, currentUser.id());
-        if (!memberExists) throw new ServiceException(ReturnCode.NOT_AUTHORIZED);
 
-        if (request.messageType() != CREATE_LOOP && request.messageType() != UPDATE_LOOP && request.messageType() != GET_LOOP) {
-            throw new ServiceException(ReturnCode.CHATMESSAGE_INVALID_TYPE);
-        }
+        validateParticipant(chatRoomId, currentUser.id());
+        validateMessageType(request.messageType());
 
         ChatRoom chatRoom = chatRoomRepository.findByIdWithLoopAndChecklists(chatRoomId)
                 .orElseThrow(() -> new ServiceException(ReturnCode.CHATROOM_NOT_FOUND));
 
         Loop loop = chatRoom.getLoop();
-        if (loop != null && loop.getLoopRule() != null) {
-            Hibernate.initialize(loop.getLoopRule().getDaysOfWeek());
-        }
+        initializeLoopRule(loop);
 
-        LoopDetailResponse loopDetailResponse = (loop != null) ? loopMapper.toDetailResponse(loop) : null;
+        LoopDetailResponse loopDetailResponse =
+                (loop != null) ? loopMapper.toDetailResponse(loop) : null;
 
-        // 기본값: 유저 메시지 설정
-        UUID msgId = request.clientMessageId();
-        String msgContent = request.content();
-        ChatMessage.AuthorType msgAuthor = ChatMessage.AuthorType.USER;
-        List<LoopCreateRequest> msgRecommendations = null;
+        MessageContext ctx = switch (request.messageType()) {
+            case START_CHATROOM -> handleStartChatRoom(chatRoomId);
+            case GET_LOOP -> handleGetLoop(loop, loopDetailResponse, chatRoomId);
+            case BEFORE_UDATE_LOOP -> handleBeforeUpdateLoop(loop, loopDetailResponse, chatRoomId);
+            case RECREATE_LOOP -> handleRecreateLoop(chatRoomId);
+            default -> MessageContext.builder()
+                    .msgId(request.clientMessageId())
+                    .content(request.content())
+                    .author(ChatMessage.AuthorType.USER)
+                    .build();
+        };
 
-        if (request.messageType() == GET_LOOP) {
-            msgId = UUID.randomUUID();
-            msgContent = GET_LOOP_MESSAGE;
-            msgAuthor = ChatMessage.AuthorType.BOT;
-            if (loopDetailResponse != null) {
-                msgRecommendations = Collections.singletonList(convertToCreateRequest(loopDetailResponse, chatRoomId));
-            }
-        }
+        ChatMessagePayload payload = toChatMessagePayload(
+                ctx.msgId(),
+                chatRoomId,
+                currentUser.id(),
+                ctx.content(),
+                null,
+                ctx.recommendations(),
+                ctx.deleteMessageId(),
+                ctx.author(),
+                ctx.loopRuleId()
+        );
 
-        ChatMessagePayload payload = toChatMessagePayload(msgId, chatRoomId, currentUser.id(), msgContent, null, msgRecommendations, msgAuthor);
         ChatMessagePayload saved = processInbound(payload);
 
-        // ChatMessagePayload -> ChatMessageResponse
         Map<Long, Member> memberMap = chatMessageConverter.loadMembersFromPayload(List.of(saved));
         ChatMessageResponse response = chatMessageConverter.toChatMessageResponse(saved, memberMap);
-
         sseEmitterService.sendToClient(chatRoomId, MESSAGE, response);
 
-        if (request.messageType() == CREATE_LOOP) {
-            publishAI(saved, null, OPEN_AI_CREATE_TOPIC);
-        } else if (request.messageType() == UPDATE_LOOP) {
-            publishAI(saved, loopDetailResponse, OPEN_AI_UPDATE_TOPIC);
-        }
+        publishAiIfNeeded(chatRoom.getId(), request.messageType(), saved, loopDetailResponse);
     }
 
     // 해당 채팅방에서 파일 메시지 전송 [참여자 권한]
@@ -267,7 +269,9 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                     null,
                     uploaded,
                     null,
-                    ChatMessage.AuthorType.USER
+                    null,
+                    ChatMessage.AuthorType.USER,
+                    null
             );
             ChatMessagePayload saved = processInbound(payload);
             // 5) Response 변환
@@ -282,6 +286,27 @@ public class ChatMessageServiceImpl implements ChatMessageService {
             if (e instanceof ServiceException se) throw se;
             throw new ServiceException(ReturnCode.INTERNAL_ERROR);
         }
+    }
+
+    @Override
+    @Transactional
+    public String deleteRecommendationMessage(Long chatRoomId) {
+        Pageable pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<ChatMessage> recentMessages = chatMessageMongoRepository.findByChatRoomId(chatRoomId, pageable);
+
+        Optional<ChatMessage> target = recentMessages.getContent().stream()
+                .filter(msg -> msg.getAuthorType() == ChatMessage.AuthorType.BOT
+                        && msg.getRecommendations() != null
+                        && !msg.getRecommendations().isEmpty())
+                .findFirst();
+
+        if (target.isPresent()) {
+            ChatMessage msg = target.get();
+            String id = msg.getId();
+            chatMessageMongoRepository.delete(msg);
+            return id;
+        }
+        return null;
     }
 
     // ----------------- 헬퍼 메서드 -----------------
@@ -316,8 +341,13 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         }
     }
 
-    private ChatMessagePayload toChatMessagePayload(UUID clientMessageId, Long chatRoomId, Long userId, String content, List<ChatAttachment> attachments, List<LoopCreateRequest> recommendations, ChatMessage.AuthorType authorType) {
-        String id = "u:" + clientMessageId;
+    private ChatMessagePayload toChatMessagePayload(UUID clientMessageId, Long chatRoomId, Long userId, String content, List<ChatAttachment> attachments, List<LoopCreateRequest> recommendations, String deleteMessageId, ChatMessage.AuthorType authorType, Long loopRuleId) {
+        String id;
+        if (authorType.equals(ChatMessage.AuthorType.BOT)) {
+            id = "ai:" + clientMessageId;
+        } else {
+            id = "u:" + clientMessageId;
+        }
         return new ChatMessagePayload(
                 id,
                 clientMessageId,
@@ -326,7 +356,8 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 content,
                 attachments,
                 recommendations,
-                null,
+                loopRuleId,
+                deleteMessageId,
                 authorType,
                 true,
                 java.time.Instant.now(),
@@ -353,5 +384,77 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 .chatMessageResponse(response)
                 .build();
         chatMessageEventPublisher.publishWsEvent(out);
+    }
+
+    private MessageContext handleStartChatRoom(Long chatRoomId) {
+        return MessageContext.builder()
+                .msgId(UUID.randomUUID())
+                .content(AI_START_MESSAGE)
+                .author(ChatMessage.AuthorType.BOT)
+                .build();
+    }
+
+    private MessageContext handleGetLoop(Loop loop, LoopDetailResponse loopDetailResponse, Long chatRoomId) {
+        return MessageContext.builder()
+                .msgId(UUID.randomUUID())
+                .content(AI_AFTER_SELECT_LOOP_MESSAGE)
+                .author(ChatMessage.AuthorType.BOT)
+                .recommendations(loopDetailResponse != null
+                        ? List.of(convertToCreateRequest(loopDetailResponse, chatRoomId))
+                        : null)
+                .loopRuleId(loop != null && loop.getLoopRule() != null
+                        ? loop.getLoopRule().getId()
+                        : null)
+                .build();
+    }
+
+    private MessageContext handleBeforeUpdateLoop(Loop loop, LoopDetailResponse loopDetailResponse, Long chatRoomId) {
+        return MessageContext.builder()
+                .msgId(UUID.randomUUID())
+                .content(AI_UPDATE_MESSAGE)
+                .author(ChatMessage.AuthorType.BOT)
+                .recommendations(loopDetailResponse != null
+                        ? List.of(convertToCreateRequest(loopDetailResponse, chatRoomId))
+                        : null)
+                .loopRuleId(loop != null && loop.getLoopRule() != null
+                        ? loop.getLoopRule().getId()
+                        : null)
+                .build();
+    }
+
+    private MessageContext handleRecreateLoop(Long chatRoomId) {
+        return MessageContext.builder()
+                .msgId(UUID.randomUUID())
+                .content(AI_RECREATE_MESSAGE)
+                .author(ChatMessage.AuthorType.BOT)
+                .deleteMessageId(deleteRecommendationMessage(chatRoomId))
+                .build();
+    }
+
+    private void validateParticipant(Long chatRoomId, Long memberId) {
+        if (!chatRoomRepository.existsMember(chatRoomId, memberId)) {
+            throw new ServiceException(ReturnCode.NOT_AUTHORIZED);
+        }
+    }
+
+    private void validateMessageType(MessageType type) {
+        if (!EnumSet.of(START_CHATROOM, CREATE_LOOP, UPDATE_LOOP, GET_LOOP, RECREATE_LOOP, BEFORE_UDATE_LOOP).contains(type)) {
+            throw new ServiceException(ReturnCode.CHATMESSAGE_INVALID_TYPE);
+        }
+    }
+
+    private void initializeLoopRule(Loop loop) {
+        if (loop != null && loop.getLoopRule() != null) {
+            Hibernate.initialize(loop.getLoopRule().getDaysOfWeek());
+        }
+    }
+
+    private void publishAiIfNeeded(Long chatRoomId, MessageType type, ChatMessagePayload saved, LoopDetailResponse loopDetailResponse) {
+        if (type == CREATE_LOOP) {
+            publishAI(saved, null, OPEN_AI_CREATE_TOPIC);
+        } else if (type == UPDATE_LOOP) {
+            publishAI(saved, loopDetailResponse, OPEN_AI_UPDATE_TOPIC);
+            chatRoomStateService.setCallUpdateLoop(chatRoomId, true);
+        }
     }
 }

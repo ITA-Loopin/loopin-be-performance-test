@@ -17,11 +17,12 @@ import static com.loopone.loopinbe.global.constants.KafkaKey.*;
 public class NotificationEventConsumer {
     private final NotificationService notificationService;
     private static final Map<String, String> TOPIC_TITLE_MAP = Map.of(
-            FOLLOW_NOTIFICATION_TOPIC, "팔로우 알림"
+            FOLLOW_NOTIFICATION_TOPIC, "팔로우 알림",
+            INVITE_TOPIC, "초대 알림"
     );
 
     @KafkaListener(
-            topics = { FOLLOW_NOTIFICATION_TOPIC },
+            topics = { FOLLOW_NOTIFICATION_TOPIC, INVITE_TOPIC },
             groupId = NOTIFICATION_GROUP_ID, containerFactory = KAFKA_LISTENER_CONTAINER
     )
     public void consumeNotification(ConsumerRecord<String, String> rec) {

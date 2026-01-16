@@ -105,7 +105,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         return memberId;
     }
 
-    @Override
     public void handleTextMessage(WebSocketSession session, TextMessage message) {
         try {
             Long chatRoomId = requireChatRoomId(session);
@@ -113,7 +112,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             ChatWebSocketPayload in = objectMapper.readValue(message.getPayload(), ChatWebSocketPayload.class);
             switch (in.getMessageType()) {
                 case MESSAGE -> {
-                    // 1) validation
                     UUID clientMessageId = in.getClientMessageId();
                     if (clientMessageId == null) {
                         sendWsError(session, "BAD_REQUEST", "clientMessageId is required");
@@ -126,67 +124,43 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
                         sendWsError(session, "BAD_REQUEST", "content is required");
                         return;
                     }
-                    // 2) inbound payload 생성 (idempotent key)
-                    Instant now = Instant.now();
-                    ChatMessagePayload inbound = new ChatMessagePayload(
-                            "u:" + clientMessageId,
-                            clientMessageId,
-                            chatRoomId,
-                            memberId,
-                            content,
-                            null,
-                            null,
-                            null,
-                            ChatMessage.AuthorType.USER,
-                            false,
-                            now,
-                            now
-                    );
-                    // 3) Mongo upsert (멱등 저장)
-                    ChatMessagePayload saved = chatMessageService.processInbound(inbound);
-                    // 4) WS 응답 DTO로 매핑
-                    Map<Long, Member> memberMap = chatMessageConverter.loadMembersFromPayload(List.of(saved));
-                    ChatMessageResponse savedResp = chatMessageConverter.toChatMessageResponse(saved, memberMap);
-                    ChatWebSocketPayload out = ChatWebSocketPayload.builder()
+                    // 저장은 컨슈머가 함. 여기서는 이벤트만 발행.
+                    ChatWebSocketPayload event = ChatWebSocketPayload.builder()
                             .messageType(MessageType.MESSAGE)
                             .chatRoomId(chatRoomId)
-                            .chatMessageResponse(savedResp)
-                            .clientMessageId(saved.clientMessageId())
+                            .memberId(memberId)
+                            .clientMessageId(clientMessageId)
+                            .chatMessageResponse(ChatMessageResponse.builder()
+                                    .content(content)
+                                    .build())
                             .build();
-                    chatMessageEventPublisher.publishWsEvent(out);
+                    chatMessageEventPublisher.publishWsEvent(event);
                 }
                 case READ_UP_TO -> {
                     if (in.getLastReadAt() == null) {
                         sendWsError(session, "BAD_REQUEST", "lastReadAt is required");
                         return;
                     }
-                    Instant updated = chatRoomMemberService.updateLastReadAt(chatRoomId, memberId, in.getLastReadAt());
-                    ChatWebSocketPayload out = ChatWebSocketPayload.builder()
+                    ChatWebSocketPayload event = ChatWebSocketPayload.builder()
                             .messageType(MessageType.READ_UP_TO)
                             .chatRoomId(chatRoomId)
                             .memberId(memberId)
-                            .lastReadAt(updated)
+                            .lastReadAt(in.getLastReadAt())
                             .build();
-                    chatMessageEventPublisher.publishWsEvent(out);
+                    chatMessageEventPublisher.publishWsEvent(event);
                 }
                 case DELETE -> {
                     if (in.getDeleteId() == null) {
                         sendWsError(session, "BAD_REQUEST", "messageId is required");
                         return;
                     }
-                    String messageId = in.getDeleteId();
-                    try {
-                        chatMessageService.deleteChatMessage(messageId, memberId);
-                        ChatWebSocketPayload out = ChatWebSocketPayload.builder()
-                                .messageType(MessageType.DELETE)
-                                .chatRoomId(chatRoomId)
-                                .deleteId(in.getDeleteId())
-                                .build();
-                        chatMessageEventPublisher.publishWsEvent(out);
-                    } catch (Exception e) {
-                        log.error("Failed to delete message: {}", messageId, e);
-                        sendWsError(session, "DELETE_FAILED", "Failed to delete message");
-                    }
+                    ChatWebSocketPayload event = ChatWebSocketPayload.builder()
+                            .messageType(MessageType.DELETE)
+                            .chatRoomId(chatRoomId)
+                            .memberId(memberId)
+                            .deleteId(in.getDeleteId())
+                            .build();
+                    chatMessageEventPublisher.publishWsEvent(event);
                 }
                 default -> log.warn("Unknown/Unhandled messageType: {}", in.getMessageType());
             }

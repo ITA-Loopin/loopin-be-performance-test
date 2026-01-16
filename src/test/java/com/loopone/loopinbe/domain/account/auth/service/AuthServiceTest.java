@@ -104,7 +104,7 @@ class AuthServiceTest {
         verify(jwtTokenProvider).generateToken(eq(email), eq("ACCESS"), any());
         verify(jwtTokenProvider).generateToken(eq(email), eq("REFRESH"), any());
         verify(refreshTokenService).saveRefreshToken(
-                eq("1"),
+                eq("jun@loop.in"),
                 eq("refresh-token-456"),
                 any()
         );
@@ -182,7 +182,7 @@ class AuthServiceTest {
         given(wsSessionRegistry.count(1L)).willReturn(2);
 
         // when
-        authService.logout(currentUser.id(), accessToken);
+        authService.logout(currentUser, accessToken);
 
         // then
         verify(refreshTokenService).deleteRefreshToken("1");
@@ -205,7 +205,7 @@ class AuthServiceTest {
         given(jwtTokenProvider.validateAccessToken(anyString())).willReturn(false);
 
         // when
-        authService.logout(currentUser.id(), "invalid-token");
+        authService.logout(currentUser, "invalid-token");
 
         // then
         verify(refreshTokenService).deleteRefreshToken("1");

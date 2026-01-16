@@ -16,6 +16,7 @@ public record ChatMessagePayload(
         List<ChatAttachment> attachments,
         List<LoopCreateRequest> recommendations,
         Long loopRuleId,
+        String deleteMessageId,
         ChatMessage.AuthorType authorType,
         boolean isBotRoom,
         Instant createdAt,

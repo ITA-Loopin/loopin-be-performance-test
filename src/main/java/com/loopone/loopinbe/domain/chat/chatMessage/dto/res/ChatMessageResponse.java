@@ -24,6 +24,7 @@ public class ChatMessageResponse {
     private List<ChatAttachmentResponse> attachments;
     private List<LoopCreateRequest> recommendations;
     private Long loopRuleId;
+    private String deleteMessageId;
     private ChatMessage.AuthorType authorType;
     @JsonFormat(shape = JsonFormat.Shape.STRING)
     private Instant createdAt;

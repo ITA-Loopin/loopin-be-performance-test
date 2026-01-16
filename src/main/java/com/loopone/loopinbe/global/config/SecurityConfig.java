@@ -57,6 +57,7 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/rest-api/v1/auth/signup-login",
                                 "/rest-api/v1/auth/login",
+                                "/rest-api/v1/auth/refresh-token",
                                 "/rest-api/v1/member/available",
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",

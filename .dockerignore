@@ -1,0 +1,6 @@
+# 기본적으로 build 전체는 제외
+build/
+
+# 이미지에 넣을 jar는 다시 포함
+!build/libs/
+!build/libs/*.jar

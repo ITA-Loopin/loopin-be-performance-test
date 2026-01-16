@@ -4,6 +4,8 @@ import com.loopone.loopinbe.domain.account.auth.currentUser.CurrentUserDto;
 import com.loopone.loopinbe.domain.account.member.converter.MemberConverter;
 import com.loopone.loopinbe.domain.account.member.entity.Member;
 import com.loopone.loopinbe.domain.account.member.repository.MemberRepository;
+import com.loopone.loopinbe.domain.chat.chatMessage.dto.req.ChatMessageRequest;
+import com.loopone.loopinbe.domain.chat.chatMessage.entity.type.MessageType;
 import com.loopone.loopinbe.domain.chat.chatMessage.service.ChatMessageService;
 import com.loopone.loopinbe.domain.chat.chatRoom.converter.ChatRoomConverter;
 import com.loopone.loopinbe.domain.chat.chatRoom.dto.req.ChatRoomRequest;
@@ -19,6 +21,7 @@ import com.loopone.loopinbe.domain.loop.loop.dto.res.LoopDetailResponse;
 import com.loopone.loopinbe.domain.loop.loop.mapper.LoopMapper;
 import com.loopone.loopinbe.domain.team.team.entity.Team;
 import com.loopone.loopinbe.domain.team.team.repository.TeamRepository;
+import com.loopone.loopinbe.domain.team.team.repository.TeamMemberRepository;
 import com.loopone.loopinbe.global.exception.ReturnCode;
 import com.loopone.loopinbe.global.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
@@ -26,10 +29,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+
+import static com.loopone.loopinbe.global.constants.Constant.AI_START_MESSAGE;
 
 @Slf4j
 @Service
@@ -41,8 +43,8 @@ public class ChatRoomServiceImpl implements ChatRoomService {
     private final ChatRoomMemberRepository chatRoomMemberRepository;
     private final MemberConverter memberConverter;
     private final ChatRoomConverter chatRoomConverter;
-    private final LoopMapper loopMapper;
     private final TeamRepository teamRepository;
+    private final TeamMemberRepository teamMemberRepository;
 
     // 채팅방 생성(DM/그룹)
     @Override
@@ -98,8 +100,8 @@ public class ChatRoomServiceImpl implements ChatRoomService {
     // AI 채팅방 생성
     @Override
     @Transactional
-    public ChatRoomResponse createAiChatRoom(Long userId) {
-        Member member = memberRepository.findById(userId)
+    public ChatRoomResponse createAiChatRoom(CurrentUserDto currentUser) {
+        Member member = memberRepository.findById(currentUser.id())
                 .orElseThrow(() -> new ServiceException(ReturnCode.USER_NOT_FOUND));
         // 새로운 채팅방 생성
         ChatRoom chatRoom = ChatRoom.builder()
@@ -116,6 +118,15 @@ public class ChatRoomServiceImpl implements ChatRoomService {
         chatRoom.setChatRoomMembers(chatRoomMembers);
         chatRoomRepository.save(chatRoom);
         memberRepository.save(member);
+        chatMessageService.sendChatMessage(
+                chatRoom.getId(),
+                new ChatMessageRequest(
+                        AI_START_MESSAGE,
+                        UUID.randomUUID(),
+                        MessageType.START_CHATROOM
+                ),
+                currentUser
+        );
         return chatRoomConverter.toChatRoomResponse(enterChatRoomMyself);
     }
 
@@ -131,31 +142,18 @@ public class ChatRoomServiceImpl implements ChatRoomService {
     }
 
     @Override
-    public void createTeamChatRoom(Long userId, Team team, List<Member> members) {
+    public void createTeamChatRoom(Long userId, Team team) {
         ChatRoom chatRoom = ChatRoom.builder()
                 .title(team.getName())
                 .member(team.getLeader())
                 .isBotRoom(false)
                 .teamId(team.getId())
                 .build();
-
         List<ChatRoomMember> chatRoomMembers = new ArrayList<>();
-
         chatRoomMembers.add(ChatRoomMember.builder()
                 .member(team.getLeader())
                 .chatRoom(chatRoom)
                 .build());
-
-        if (members != null && !members.isEmpty()) {
-            // 팀원 모두 추가
-            for (Member member : members) {
-                chatRoomMembers.add(ChatRoomMember.builder()
-                        .member(member)
-                        .chatRoom(chatRoom)
-                        .build());
-            }
-        }
-
         chatRoom.setChatRoomMembers(chatRoomMembers);
         chatRoomRepository.save(chatRoom);
     }
@@ -173,6 +171,14 @@ public class ChatRoomServiceImpl implements ChatRoomService {
         chatRoomRepository.findByTeamId(teamId).ifPresent(chatRoom -> {
             chatMessageService.deleteAllChatMessages(chatRoom.getId());
             chatRoomRepository.delete(chatRoom);
+        });
+    }
+
+    @Override
+    @Transactional
+    public void leaveTeamChatRoom(Long memberId, Long teamId) {
+        chatRoomRepository.findByTeamId(teamId).ifPresent(chatRoom -> {
+            chatRoomMemberRepository.deleteByRoomIdAndMemberId(chatRoom.getId(), memberId);
         });
     }
 
@@ -220,13 +226,44 @@ public class ChatRoomServiceImpl implements ChatRoomService {
         };
     }
 
+    // 팀id로 채팅방 조회
     @Override
     @Transactional(readOnly = true)
-    public LoopDetailResponse findLoopDetailResponse(Long chatRoomId) {
-        ChatRoom chatRoom = chatRoomRepository.findById(chatRoomId)
+    public ChatRoomResponse findChatRoomByTeamId(Long teamId, CurrentUserDto currentUser) {
+        if (!teamMemberRepository.existsByTeamIdAndMemberId(teamId, currentUser.id())) {
+            throw new ServiceException(ReturnCode.NOT_AUTHORIZED);
+        }
+
+        ChatRoom chatRoom = chatRoomRepository.findByTeamId(teamId)
                 .orElseThrow(() -> new ServiceException(ReturnCode.CHATROOM_NOT_FOUND));
 
-        return loopMapper.toDetailResponse(chatRoom.getLoop());
+        return chatRoomConverter.toChatRoomResponse(chatRoom);
+    }
+
+    // 초대 수락 시 채팅방에 참여
+    @Override
+    @Transactional
+    public  void participateChatRoom(Long teamId, Long currentUserId) {
+        Member member = memberRepository.findById(currentUserId)
+                .orElseThrow(() -> new ServiceException(ReturnCode.MEMBER_NOT_FOUND));
+        // 1) 팀 채팅방 조회 (없으면 생성까지 해주고 싶으면 아래 create 로직 사용)
+        ChatRoom teamRoom = chatRoomRepository
+                .findByTeamIdAndIsBotRoomFalse(teamId)
+                .orElseThrow(() -> new ServiceException(ReturnCode.CHATROOM_NOT_FOUND));
+        // 2) 이미 참여 중이면 idempotent 하게 종료
+        boolean alreadyJoined = chatRoomMemberRepository.existsByChatRoomIdAndMemberId(teamRoom.getId(), currentUserId);
+        if (alreadyJoined) return;
+        // 3) 인원 제한 체크
+        long currentCount = chatRoomMemberRepository.countByChatRoomId(teamRoom.getId());
+        if (currentCount >= ChatRoom.ROOM_MEMBER_LIMIT) {
+            throw new ServiceException(ReturnCode.CHATROOM_LIMIT_EXCEEDED);
+        }
+        // 4) ChatRoomMember 생성
+        ChatRoomMember crm = ChatRoomMember.builder()
+                .chatRoom(teamRoom)
+                .member(member)
+                .build();
+        chatRoomMemberRepository.save(crm);
     }
 
     private ChatRoomListResponse getAllChatRooms(Long memberId) {

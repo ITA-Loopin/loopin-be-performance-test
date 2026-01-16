@@ -128,6 +128,16 @@ public enum ReturnCode {
     TEAM_LOOP_NOT_FOUND(404, "TEAM_004", "팀 루프를 찾을 수 없습니다."),
     NOT_PARTICIPATING_IN_LOOP(404, "TEAM_005", "해당 루프에 참여하지 않았습니다."),
     PROGRESS_NOT_FOUND(404, "TEAM_006", "팀 루프의 내 진행 상태를 찾을 수 없습니다."),
+    MEMBER_NOT_FOUND(404, "TEAM_007", "멤버를 찾을 수 없습니다."),
+    ALREADY_TEAM_MEMBER(409, "TEAM_008", "이미 팀원입니다."),
+    INVITATION_ALREADY_SENT(409, "TEAM_009", "이미 초대를 보냈습니다."),
+    INVITATION_NOT_FOUND(404, "TEAM_010", "초대를 찾을 수 없습니다."),
+    INVALID_INVITATION(400, "TEAM_011", "유효하지 않은 초대입니다."),
+    INVITATION_ALREADY_RESPONDED(400, "TEAM_012", "이미 응답한 초대입니다."),
+    UNAUTHORIZED_TEAM_LEADER_ONLY(403, "TEAM_013", "팀 리더만 수행할 수 있습니다."),
+    UNAUTHORIZED_INVITATION_RECIPIENT_ONLY(403, "TEAM_014", "초대받은 사람만 수행할 수 있습니다."),
+    TEAM_LEADER_CANNOT_LEAVE(403, "TEAM_015", "팀 리더는 팀을 나갈 수 없습니다."),
+    CANNOT_REMOVE_SELF(400, "TEAM_016", "자기 자신은 삭제할 수 없습니다."),
 
     // Follow
     ALREADY_REQUESTED(409, "FOLLOW_001", "이미 팔로우 요청을 보냈습니다."),
@@ -154,6 +164,7 @@ public enum ReturnCode {
     // Kafka
     KAFKA_SEND_ERROR(500, "KAFKA_001", "카프카 전송 중 오류가 발생했습니다."),
     ;
+
     private final int status;
     private final String code;
     private final String message;

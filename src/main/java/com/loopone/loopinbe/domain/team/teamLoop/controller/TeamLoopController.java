@@ -92,4 +92,14 @@ public class TeamLoopController {
         MemberActivitiesResponse response = teamLoopService.getMemberActivities(teamId, targetDate, currentUser);
         return ApiResponse.success(response);
     }
+
+    @PostMapping("/{teamId}/loops/{loopId}/complete")
+    @Operation(summary = "팀 루프 완료 처리", description = "해당 팀 루프의 모든 체크리스트를 완료 처리합니다.")
+    public ApiResponse<Void> completeTeamLoop(
+            @PathVariable Long teamId,
+            @PathVariable Long loopId,
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
+        teamLoopService.completeTeamLoop(teamId, loopId, currentUser);
+        return ApiResponse.success();
+    }
 }

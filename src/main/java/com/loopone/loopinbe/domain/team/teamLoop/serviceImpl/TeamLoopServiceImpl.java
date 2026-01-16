@@ -77,9 +77,11 @@ public class TeamLoopServiceImpl implements TeamLoopService {
                     String repeatCycle = formatRepeatCycle(loop.getLoopRule());
                     // 나의 루프 상태
                     TeamLoopStatus myStatus = loop.calculatePersonalStatus(myId);
+                    // 팀 전체 루프 상태
+                    TeamLoopStatus teamStatus = loop.calculateTeamStatus();
 
-                    // 상태 필터링 (statusFilter가 null이 아닐 때만)
-                    if (statusFilter != null && myStatus != statusFilter) {
+                    // 상태 필터링 (statusFilter가 null이 아닐 때만, 팀 상태 기준)
+                    if (statusFilter != null && teamStatus != statusFilter) {
                         return null; // 필터링 대상
                     }
 
@@ -93,7 +95,8 @@ public class TeamLoopServiceImpl implements TeamLoopService {
                             .personalProgress(myProgress)
                             .isParticipating(isParticipating)
                             .repeatCycle(repeatCycle)
-                            .status(myStatus)
+                            .personalStatus(myStatus)
+                            .teamStatus(teamStatus)
                             .build();
                 })
                 .filter(Objects::nonNull) // null 제거 (필터링된 항목)
@@ -365,6 +368,52 @@ public class TeamLoopServiceImpl implements TeamLoopService {
                 .memberActivities(memberActivities)
                 .recentTeamActivities(teamActivityLogs)
                 .build();
+    }
+
+    // 팀 루프 완료 처리
+    @Override
+    @Transactional
+    public void completeTeamLoop(Long teamId, Long loopId, CurrentUserDto currentUser) {
+        // 팀원 검증
+        validateTeamMember(teamId, currentUser.id());
+
+        // 팀 루프 조회
+        TeamLoop teamLoop = teamLoopRepository.findById(loopId)
+                .orElseThrow(() -> new ServiceException(ReturnCode.TEAM_LOOP_NOT_FOUND));
+
+        // 팀 ID 일치 검증
+        if (!teamLoop.getTeam().getId().equals(teamId)) {
+            throw new ServiceException(ReturnCode.INVALID_REQUEST_TEAM);
+        }
+
+        // 멤버 조회
+        Member member = memberRepository.findById(currentUser.id())
+                .orElseThrow(() -> new ServiceException(ReturnCode.USER_NOT_FOUND));
+
+        // 해당 사용자의 Progress 조회
+        TeamLoopMemberProgress myProgress = teamLoopMemberProgressRepository
+                .findByTeamLoopAndMember(teamLoop, member)
+                .orElseThrow(() -> new ServiceException(ReturnCode.NOT_PARTICIPATING_IN_LOOP));
+
+        // 모든 체크리스트 조회 및 완료 처리
+        List<TeamLoopMemberCheck> checks = teamLoopMemberCheckRepository
+                .findByMemberProgressIdOrderByIdAsc(myProgress.getId());
+
+        for (TeamLoopMemberCheck check : checks) {
+            if (!check.isChecked()) {
+                check.setChecked(true);
+            }
+        }
+
+        // 팀 루프 완료 활동 로그 기록
+        TeamLoopActivity activity = TeamLoopActivity.builder()
+                .member(member)
+                .team(teamLoop.getTeam())
+                .teamLoop(teamLoop)
+                .actionType(com.loopone.loopinbe.domain.team.teamLoop.enums.TeamLoopActivityType.LOOP_COMPLETED)
+                .targetName(teamLoop.getTitle())
+                .build();
+        teamLoopActivityRepository.save(activity);
     }
 
     // ========== 비즈니스 로직 메서드 ==========

@@ -37,8 +37,7 @@ public class TeamController {
     @Operation(summary = "팀 생성", description = "새로운 팀을 생성하고 팀원을 초대합니다.")
     public ApiResponse<Long> createTeam(
             @Valid @RequestBody TeamCreateRequest request,
-            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser
-    ) {
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
         Long teamId = teamService.createTeam(request, currentUser);
         return ApiResponse.success(teamId);
     }
@@ -46,8 +45,7 @@ public class TeamController {
     @GetMapping("/my")
     @Operation(summary = "내 팀 리스트 조회", description = "내가 참여 중인 팀 리스트를 조회합니다.")
     public ApiResponse<List<MyTeamResponse>> getMyTeams(
-            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser
-    ) {
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
         List<MyTeamResponse> response = teamService.getMyTeams(currentUser);
         return ApiResponse.success(response);
     }
@@ -56,8 +54,7 @@ public class TeamController {
     @Operation(summary = "모집 중인 팀 리스트 조회", description = "참여 가능한 다른 팀 리스트를 조회합니다.")
     public ApiResponse<List<RecruitingTeamResponse>> getRecruitingTeams(
             @ModelAttribute TeamPage request,
-            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser
-    ) {
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
         Pageable pageable = PageRequest.of(request.getPage(), request.getSize());
         PageResponse<RecruitingTeamResponse> response = teamService.getRecruitingTeams(pageable, currentUser);
         return ApiResponse.success(response);
@@ -68,8 +65,7 @@ public class TeamController {
     public ApiResponse<TeamDetailResponse> getTeamDetail(
             @PathVariable Long teamId,
             @RequestParam(required = false) LocalDate date,
-            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser
-    ) {
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
         LocalDate targetDate = (date != null) ? date : LocalDate.now();
         TeamDetailResponse response = teamService.getTeamDetails(teamId, targetDate, currentUser);
         return ApiResponse.success(response);
@@ -78,8 +74,7 @@ public class TeamController {
     @GetMapping("/{teamId}/members")
     @Operation(summary = "팀원 리스트 조회", description = "해당 팀에 소속된 팀원 목록을 조회합니다.")
     public ApiResponse<List<TeamMemberResponse>> getTeamMembers(
-            @PathVariable Long teamId
-    ) {
+            @PathVariable Long teamId) {
         List<TeamMemberResponse> response = teamService.getTeamMembers(teamId);
         return ApiResponse.success(response);
     }
@@ -88,8 +83,7 @@ public class TeamController {
     @Operation(summary = "내 팀 목록 순서 변경", description = "드래그로 변경한 팀 목록 순서를 저장합니다.")
     public ApiResponse<Void> updateTeamOrder(
             @Valid @RequestBody TeamOrderUpdateRequest request,
-            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser
-    ) {
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
         teamService.updateTeamOrder(request, currentUser);
         return ApiResponse.success();
     }
@@ -98,9 +92,27 @@ public class TeamController {
     @Operation(summary = "팀 삭제", description = "팀 리더만 삭제 가능합니다. 팀, 팀루프, 팀채팅방이 삭제됩니다.")
     public ApiResponse<Void> deleteTeam(
             @CurrentUser CurrentUserDto currentUser,
-            @PathVariable Long teamId
-    ) {
+            @PathVariable Long teamId) {
         teamService.deleteTeam(teamId, currentUser);
+        return ApiResponse.success();
+    }
+
+    @PostMapping("/{teamId}/leave")
+    @Operation(summary = "팀 나가기", description = "팀원이 팀을 나갑니다. (팀 리더는 불가)")
+    public ApiResponse<Void> leaveTeam(
+            @PathVariable Long teamId,
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
+        teamService.leaveTeam(teamId, currentUser);
+        return ApiResponse.success();
+    }
+
+    @DeleteMapping("/{teamId}/members/{memberId}")
+    @Operation(summary = "팀원 삭제", description = "팀 리더가 팀원을 삭제합니다. (자기 자신은 삭제 불가)")
+    public ApiResponse<Void> removeMember(
+            @PathVariable Long teamId,
+            @PathVariable Long memberId,
+            @Parameter(hidden = true) @CurrentUser CurrentUserDto currentUser) {
+        teamService.removeMember(teamId, memberId, currentUser);
         return ApiResponse.success();
     }
 }

@@ -41,4 +41,7 @@ public class Team extends BaseEntity {
 
     @OneToMany(mappedBy = "team", cascade = CascadeType.ALL, orphanRemoval = true) // 팀 삭제 시, 소속 정보 삭제
     private List<TeamMember> teamMembers = new ArrayList<>(); // 팀원 목록
+
+    @OneToMany(mappedBy = "team", cascade = CascadeType.ALL, orphanRemoval = true) // 팀 삭제 시, 초대 정보 삭제
+    private List<TeamInvitation> teamInvitations = new ArrayList<>(); // 팀 초대 목록
 }

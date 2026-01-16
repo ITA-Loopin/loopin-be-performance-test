@@ -33,6 +33,7 @@ public class ChatMessageMongoRepositoryImpl implements ChatMessageMongoRepositor
             List<ChatAttachment> attachments,
             List<LoopCreateRequest> recommendations,
             Long loopRuleId,
+            String deleteMessageId,
             ChatMessage.AuthorType authorType,
             Instant createdAt,
             Instant modifiedAt
@@ -48,6 +49,7 @@ public class ChatMessageMongoRepositoryImpl implements ChatMessageMongoRepositor
                 .setOnInsert("attachments", attachments)
                 .setOnInsert("recommendations", recommendations)
                 .setOnInsert("loopRuleId", loopRuleId)
+                .setOnInsert("deleteMessageId", deleteMessageId)
                 .setOnInsert("authorType", authorType)
                 .setOnInsert("createdAt", createdAt)
                 .setOnInsert("modifiedAt", modifiedAt);

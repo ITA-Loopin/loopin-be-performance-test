@@ -30,4 +30,6 @@ public interface TeamLoopService {
     void transferTeamLoopRuleOwner(Long teamId, Long oldLeaderId, Member newLeader);
 
     MemberActivitiesResponse getMemberActivities(Long teamId, LocalDate targetDate, CurrentUserDto currentUser);
+
+    void completeTeamLoop(Long teamId, Long loopId, CurrentUserDto currentUser);
 }

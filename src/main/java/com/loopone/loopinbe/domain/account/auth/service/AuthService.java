@@ -13,8 +13,8 @@ public interface AuthService {
     LoginResponse login(LoginRequest loginRequest);
 
     // 로그아웃
-    void logout(Long currentUserId, String accessToken);
+    void logout(CurrentUserDto currentUser, String accessToken);
 
     // accessToken 재발급
-    LoginResponse refreshToken(String refreshToken, CurrentUserDto currentUser);
+    LoginResponse refreshToken(String refreshToken);
 }
