@@ -69,7 +69,7 @@ public class WebAuthController {
     public ResponseEntity<ApiResponse<Void>> logout(HttpServletRequest request,
                                                     @CurrentUser CurrentUserDto currentUser) {
         String accessToken = tokenResolver.resolveAccess(request);
-        authService.logout(currentUser.id(), accessToken);
+        authService.logout(currentUser, accessToken);
 
         ResponseCookie accessCookie = webAuthCookieFactory.expireAccess();
         ResponseCookie refreshCookie = webAuthCookieFactory.expireRefresh();
@@ -82,11 +82,9 @@ public class WebAuthController {
     // accessToken 재발급
     @GetMapping("/refresh-token")
     @Operation(summary = "accessToken 재발급", description = "refresh 토큰을 사용하여 access 토큰을 재발급합니다.")
-    public ResponseEntity<ApiResponse<Void>> refreshToken(
-            HttpServletRequest request,
-            @CurrentUser CurrentUserDto currentUser) {
+    public ResponseEntity<ApiResponse<Void>> refreshToken(HttpServletRequest request) {
         String refreshToken = tokenResolver.resolveRefresh(request);
-        LoginResponse refreshed = authService.refreshToken(refreshToken, currentUser);
+        LoginResponse refreshed = authService.refreshToken(refreshToken);
 
         ResponseCookie accessCookie = webAuthCookieFactory.issueAccess(refreshed.getAccessToken()); // access만 갱신
         return ResponseEntity.ok()

@@ -44,6 +44,8 @@ public class ChatMessage extends BaseDocument {
 
     private Long loopRuleId;
 
+    private String deleteMessageId;
+
     @Indexed
     private AuthorType authorType;
     public enum AuthorType {

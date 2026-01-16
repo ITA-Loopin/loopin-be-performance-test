@@ -26,18 +26,19 @@ import static com.loopone.loopinbe.global.constants.KafkaKey.*;
 public class AuthEventConsumer {
     private final ObjectMapper objectMapper;
     private final AuthService authService;
+    private final MemberRepository memberRepository;
+    private final MemberConverter memberConverter;
 
     @KafkaListener(topics = LOGOUT_TOPIC, groupId = AUTH_GROUP_ID, containerFactory = KAFKA_LISTENER_CONTAINER)
     public void consumeLogout(ConsumerRecord<String, String> rec) {
         try {
             AuthPayload payload = objectMapper.readValue(rec.value(), AuthPayload.class);
             Long memberId = payload.memberId();
-            log.info("Consume Auth logout event. memberId={}, requestId={}, reason={}",
-                    memberId, payload.requestId());
-
+            Member member = memberRepository.findById(memberId)
+                    .orElseThrow(() -> new ServiceException(ReturnCode.USER_NOT_FOUND));
+            CurrentUserDto currentUser = memberConverter.toCurrentUserDto(member);
             // 기존 logout 로직 재사용
-            authService.logout(memberId, payload.accessToken());
-            log.info("Auth logout handled. memberId={}, requestId={}", memberId, payload.requestId());
+            authService.logout(currentUser, payload.accessToken());
         } catch (Exception e) {
             log.error("Failed to handle Auth logout event", e);
             throw new RuntimeException(e);

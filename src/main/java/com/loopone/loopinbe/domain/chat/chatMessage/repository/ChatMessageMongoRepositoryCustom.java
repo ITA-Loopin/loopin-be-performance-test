@@ -20,6 +20,7 @@ public interface ChatMessageMongoRepositoryCustom {
             List<ChatAttachment> attachments,
             List<LoopCreateRequest> recommendations,
             Long loopRuleId,
+            String deleteMessageId,
             ChatMessage.AuthorType authorType,
             Instant createdAt,
             Instant modifiedAt

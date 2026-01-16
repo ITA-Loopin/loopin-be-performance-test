@@ -16,11 +16,16 @@ import java.util.List;
 
 public interface TeamService {
     Long createTeam(TeamCreateRequest request, CurrentUserDto currentUser);
+
     List<MyTeamResponse> getMyTeams(CurrentUserDto currentUser);
+
     PageResponse<RecruitingTeamResponse> getRecruitingTeams(Pageable pageable, CurrentUserDto currentUser);
+
     TeamDetailResponse getTeamDetails(Long teamId, LocalDate targetDate, CurrentUserDto currentUser);
+
     List<TeamMemberResponse> getTeamMembers(Long teamId);
-    //팀 순서 변경
+
+    // 팀 순서 변경
     void updateTeamOrder(TeamOrderUpdateRequest request, CurrentUserDto currentUser);
 
     // 사용자가 참여중인 모든 팀 나가기/관련 엔티티 삭제
@@ -28,4 +33,10 @@ public interface TeamService {
 
     // 팀 삭제
     void deleteTeam(Long teamId, CurrentUserDto currentUser);
+
+    // 팀 나가기 (팀원만 가능)
+    void leaveTeam(Long teamId, CurrentUserDto currentUser);
+
+    // 팀원 삭제 (팀장만 가능)
+    void removeMember(Long teamId, Long targetMemberId, CurrentUserDto currentUser);
 }

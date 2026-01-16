@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 import static com.loopone.loopinbe.global.constants.Constant.AI_CREATE_MESSAGE;
-import static com.loopone.loopinbe.global.constants.Constant.AI_UPDATE_MESSAGE;
+import static com.loopone.loopinbe.global.constants.Constant.AI_UPDATE_SUCCESS_MESSAGE;
 import static com.loopone.loopinbe.global.constants.KafkaKey.*;
 
 @Slf4j
@@ -46,7 +46,7 @@ public class AiEventConsumer {
 
     @KafkaListener(topics = OPEN_AI_UPDATE_TOPIC, groupId = OPEN_AI_GROUP_ID, containerFactory = KAFKA_LISTENER_CONTAINER)
     public void consumeAiUpdateLoop(ConsumerRecord<String, String> rec) {
-        handleAiEvent(rec, AI_UPDATE_MESSAGE);
+        handleAiEvent(rec, AI_UPDATE_SUCCESS_MESSAGE);
     }
 
     private void handleAiEvent(ConsumerRecord<String, String> rec, String defaultMessage) {
@@ -91,6 +91,7 @@ public class AiEventConsumer {
                 null,
                 recommendationsLoop.recommendations(),
                 recommendationsLoop.loopRuleId(),
+                null,
                 ChatMessage.AuthorType.BOT,
                 true,
                 Instant.now(),

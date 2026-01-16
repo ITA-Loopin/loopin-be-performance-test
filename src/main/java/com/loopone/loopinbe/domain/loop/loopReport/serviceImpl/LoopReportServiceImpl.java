@@ -19,7 +19,9 @@ import com.loopone.loopinbe.domain.loop.loopReport.messages.WeekReportMessages;
 import com.loopone.loopinbe.domain.loop.loopReport.service.LoopReportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -39,6 +41,8 @@ public class LoopReportServiceImpl implements LoopReportService {
 
     // 루프 리포트 조회
     @Override
+    @Transactional(readOnly = true)
+    @Cacheable(value = "loopReport", key = "#currentUser.id()")
     public LoopReportResponse getLoopReport(CurrentUserDto currentUser) {
         Long memberId = currentUser.id();
         LocalDate today = LocalDate.now();

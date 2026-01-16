@@ -42,6 +42,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // 인증이 필요 없는 URL 리스트
         return path.startsWith("/rest-api/v1/auth/signup-login")
                 || path.startsWith("/rest-api/v1/auth/login")
+                || path.startsWith("/rest-api/v1/auth/refresh-token")
                 || path.startsWith("/rest-api/v1/member/available")
                 || path.startsWith("/swagger-ui")
                 || path.startsWith("/v3/api-docs")

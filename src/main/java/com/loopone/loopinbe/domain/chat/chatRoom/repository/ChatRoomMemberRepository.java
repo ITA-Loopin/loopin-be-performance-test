@@ -63,4 +63,8 @@ public interface ChatRoomMemberRepository extends JpaRepository<ChatRoomMember, 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from ChatRoomMember crm where crm.chatRoom.id = :roomId")
     int deleteAllByRoomId(@Param("roomId") Long roomId);
+
+    boolean existsByChatRoomIdAndMemberId(Long chatRoomId, Long memberId);
+
+    long countByChatRoomId(Long chatRoomId);
 }

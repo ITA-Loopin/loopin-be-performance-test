@@ -20,17 +20,20 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     // 해당 사용자가 팀 멤버인지 확인
     boolean existsByTeamIdAndMemberId(Long teamId, Long memberId);
 
+    // 특정 팀과 멤버로 TeamMember 조회
+    Optional<TeamMember> findByTeamIdAndMemberId(Long teamId, Long memberId);
+
     Optional<TeamMember> findFirstByTeam_IdAndMember_IdNotOrderByIdAsc(Long teamId, Long memberId);
 
-    //sortOrder 우선 정렬, null이면 createdAt DESC로 정렬
+    // sortOrder 우선 정렬, null이면 createdAt DESC로 정렬
     @Query("""
-        SELECT tm FROM TeamMember tm
-        WHERE tm.member = :member
-        ORDER BY
-            CASE WHEN tm.sortOrder IS NULL THEN 1 ELSE 0 END,
-            tm.sortOrder ASC,
-            tm.createdAt DESC
-    """)
+                SELECT tm FROM TeamMember tm
+                WHERE tm.member = :member
+                ORDER BY
+                    CASE WHEN tm.sortOrder IS NULL THEN 1 ELSE 0 END,
+                    tm.sortOrder ASC,
+                    tm.createdAt DESC
+            """)
     List<TeamMember> findAllByMemberOrderBySortOrder(@Param("member") Member member);
 
     // (B) 내 탈퇴용
@@ -38,7 +41,7 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, Long> {
     @Query("delete from TeamMember tm " +
             "where tm.member.id = :memberId and tm.team.id in :teamIds")
     int deleteByMemberAndTeamIds(@Param("memberId") Long memberId,
-                                 @Param("teamIds") List<Long> teamIds);
+            @Param("teamIds") List<Long> teamIds);
 
     // (A) 팀 전체 삭제용(명시적으로 지우고 싶으면)
     @Modifying(clearAutomatically = true, flushAutomatically = true)

@@ -34,6 +34,7 @@ public abstract class ChatMessageConverter {
     @Mapping(target = "attachments", expression = "java(toAttachmentResponses(chatMessage.getAttachments()))")
     @Mapping(target = "recommendations", source = "recommendations")
     @Mapping(target = "loopRuleId", source = "loopRuleId")
+    @Mapping(target = "deleteMessageId", source = "deleteMessageId")
     @Mapping(target = "authorType", source = "authorType")
     @Mapping(target = "createdAt", source = "createdAt")
     public abstract ChatMessageResponse toChatMessageResponse(
@@ -50,6 +51,7 @@ public abstract class ChatMessageConverter {
     @Mapping(target = "attachments", expression = "java(toAttachmentResponses(payload.attachments()))")
     @Mapping(target = "recommendations", source = "recommendations")
     @Mapping(target = "loopRuleId", source = "loopRuleId")
+    @Mapping(target = "deleteMessageId", source = "deleteMessageId")
     @Mapping(target = "authorType", source = "authorType")
     @Mapping(target = "createdAt", source = "createdAt")
     public abstract ChatMessageResponse toChatMessageResponse(
