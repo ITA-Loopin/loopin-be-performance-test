@@ -35,26 +35,19 @@ public class RedisConfig {
 
     @Bean
     public RedisConnectionFactory redisConnectionFactory() {
-        RedisStandaloneConfiguration redisConfiguration = new RedisStandaloneConfiguration(redisHost, redisPort);
-        return new LettuceConnectionFactory(redisConfiguration);
+        return new LettuceConnectionFactory(new RedisStandaloneConfiguration(redisHost, redisPort));
     }
 
-    // 전역(웹/도메인)용 ObjectMapper
+    @Bean(name = "baseObjectMapper")
     @Primary
-    @Bean
-    public ObjectMapper objectMapper() {
-        ObjectMapper objectMapper = new ObjectMapper();
-        objectMapper.registerModule(new JavaTimeModule());
-        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        return objectMapper;
+    public ObjectMapper baseObjectMapper(org.springframework.http.converter.json.Jackson2ObjectMapperBuilder builder) {
+        return builder.build();
     }
 
     // 캐시 전용 ObjectMapper (타입 정보 활성화)
     @Bean(name = "redisObjectMapper")
-    public ObjectMapper redisObjectMapper() {
-        ObjectMapper om = new ObjectMapper();
-        om.registerModule(new JavaTimeModule());
-        om.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    public ObjectMapper redisObjectMapper(@Qualifier("baseObjectMapper") ObjectMapper baseOm) {
+        ObjectMapper om = baseOm.copy();
         om.activateDefaultTyping(
                 com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator.instance,
                 ObjectMapper.DefaultTyping.NON_FINAL,
@@ -66,8 +59,7 @@ public class RedisConfig {
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory,
                                           @Qualifier("redisObjectMapper") ObjectMapper redisOm) {
-        GenericJackson2JsonRedisSerializer serializer =
-                new GenericJackson2JsonRedisSerializer(redisOm);
+        GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer(redisOm);
 
         // 기본 캐시 설정: TTL 10분
         RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
