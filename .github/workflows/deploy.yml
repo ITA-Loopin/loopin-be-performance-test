@@ -58,5 +58,5 @@ jobs:
               > firebase-adminsdk.json
             ./deploy.sh
             echo "Cleaning up old Docker images..."
-            docker rmi -f $(docker images junhui9789/loopin-app -q) || true
+            docker rmi -f $(docker images junhui9789/loopin-test-app -q) || true
             docker image prune -f || true
