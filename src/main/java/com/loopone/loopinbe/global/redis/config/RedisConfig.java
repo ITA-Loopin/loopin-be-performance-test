@@ -3,6 +3,11 @@ package com.loopone.loopinbe.global.redis.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.loopone.loopinbe.domain.account.member.dto.res.MemberResponse;
+import com.loopone.loopinbe.domain.loop.loop.dto.res.DailyLoopsResponse;
+import com.loopone.loopinbe.domain.loop.loop.dto.res.LoopCalendarResponse;
+import com.loopone.loopinbe.domain.loop.loop.dto.res.LoopDetailResponse;
+import com.loopone.loopinbe.domain.loop.loopReport.dto.res.LoopReportResponse;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.EnableCaching;
@@ -18,10 +23,12 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.time.Duration;
+import java.util.Map;
 
 @Configuration
 @EnableCaching
@@ -48,29 +55,36 @@ public class RedisConfig {
     @Bean(name = "redisObjectMapper")
     public ObjectMapper redisObjectMapper(@Qualifier("baseObjectMapper") ObjectMapper baseOm) {
         ObjectMapper om = baseOm.copy();
-        om.activateDefaultTyping(
-                com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator.instance,
-                ObjectMapper.DefaultTyping.NON_FINAL,
-                com.fasterxml.jackson.annotation.JsonTypeInfo.As.PROPERTY
-        );
+        om.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        om.disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         return om;
     }
 
     @Bean
-    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory,
-                                          @Qualifier("redisObjectMapper") ObjectMapper redisOm) {
-        GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer(redisOm);
-
-        // 기본 캐시 설정: TTL 10분
-        RedisCacheConfiguration defaultConfig = RedisCacheConfiguration.defaultCacheConfig()
+    public RedisCacheManager cacheManager(
+            RedisConnectionFactory connectionFactory,
+            @Qualifier("baseObjectMapper") ObjectMapper baseOm
+    ) {
+        RedisCacheConfiguration base = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(10))
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
-                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(serializer));
-
-        return RedisCacheManager.builder(connectionFactory)
-                .cacheDefaults(defaultConfig)
-                .transactionAware()
-                .build();
+                // 기본은 String/byte로 쓰거나, 그냥 baseOm 기반 generic로 둬도 됨
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
+                        new GenericJackson2JsonRedisSerializer(baseOm)
+                ));
+        RedisCacheManager.RedisCacheManagerBuilder builder = RedisCacheManager.builder(connectionFactory)
+                .cacheDefaults(base)
+                .transactionAware();
+        // 여기만 추가/관리하면 됨
+        Map<String, Class<?>> typed = Map.of(
+                "myInfo", MemberResponse.class,
+                "loopDetail", LoopDetailResponse.class,
+                "dailyLoops", DailyLoopsResponse.class,
+                "loopCalendar", LoopCalendarResponse.class,
+                "loopReport", LoopReportResponse.class
+        );
+        typed.forEach((name, type) -> builder.withCacheConfiguration(name, typedCache(base, baseOm, type)));
+        return builder.build();
     }
 
     // Object 전용 RedisTemplate
@@ -107,5 +121,19 @@ public class RedisConfig {
     @Bean
     public StringRedisTemplate stringRedisTemplate(RedisConnectionFactory connectionFactory) {
         return new StringRedisTemplate(connectionFactory);
+    }
+
+    private <T> RedisCacheConfiguration typedCache(
+            RedisCacheConfiguration base,
+            ObjectMapper baseOm,
+            Class<T> type
+    ) {
+        ObjectMapper om = baseOm.copy()
+                .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+                .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        Jackson2JsonRedisSerializer<T> ser = new Jackson2JsonRedisSerializer<>(om, type);
+        return base.serializeValuesWith(
+                RedisSerializationContext.SerializationPair.fromSerializer(ser)
+        );
     }
 }
